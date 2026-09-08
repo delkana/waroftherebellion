@@ -384,21 +384,20 @@ export class Hud {
   /** Report shown after an auto-resolved battle. */
   showBattleSummary(s: GameState, setup: BattleSetup, result: BattleResult, notes: string[]): void {
     const p = s.planets[setup.planet];
-    const lost = (f: FactionId) => {
+    const tally = (f: FactionId, survived: boolean) => {
       const counts = new Map<string, number>();
-      for (const u of setup.units.filter(u => u.faction === f && !result.survivors.has(u.id))) counts.set(u.cls.name, (counts.get(u.cls.name) ?? 0) + 1);
-      return [...counts].map(([n, k]) => `${k}× ${n}`).join('<br>') || '<i>no losses</i>';
+      for (const u of setup.units.filter(u => u.faction === f && result.survivors.has(u.id) === survived)) counts.set(u.cls.name, (counts.get(u.cls.name) ?? 0) + 1);
+      return [...counts].map(([n, k]) => `${k}× ${n}`).join('<br>') || (survived ? '<i>nothing</i>' : '<i>no losses</i>');
     };
-    const survivors = (f: FactionId) => setup.units.filter(u => u.faction === f && result.survivors.has(u.id)).length;
+    const lost = (f: FactionId) => tally(f, false);
+    const remains = (f: FactionId) => tally(f, true);
+    const column = (f: FactionId, role: string) => `<div><h4 class="${f}">${factionName(f)} (${role})</h4><div><b>Lost</b><br>${lost(f)}<br><b style="display:block;margin-top:6px">Remaining</b>${remains(f)}</div></div>`;
     const headline = result.winner ? `${factionName(result.winner)} victory` : 'Inconclusive';
     const detail = result.retreated ? `${factionName(result.retreated)} forces withdrew to hyperspace.` : result.winner ? `${factionName(result.winner)} forces hold the orbit.` : '';
     this.el('modal').innerHTML = `<div class="box panel">
       <h2>Battle of ${esc(p.name)}: ${headline}</h2>
       <p>${detail}</p>
-      <div class="forces">
-        <div><h4 class="${setup.attacker}">${factionName(setup.attacker)} (attacking)</h4><div><b>Lost</b><br>${lost(setup.attacker)}<br><span style="color:#8a98a8">${survivors(setup.attacker)} ships remain</span></div></div>
-        <div><h4 class="${setup.defender}">${factionName(setup.defender)} (defending)</h4><div><b>Lost</b><br>${lost(setup.defender)}<br><span style="color:#8a98a8">${survivors(setup.defender)} ships remain</span></div></div>
-      </div>
+      <div class="forces">${column(setup.attacker, 'attacking')}${column(setup.defender, 'defending')}</div>
       ${notes.length ? `<p>${notes.map(esc).join('<br>')}</p>` : ''}
       <div class="buttons"><button class="primary" data-action="closeSummary">Continue</button></div></div>`;
     this.el('modal').classList.add('show');
