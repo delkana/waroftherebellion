@@ -254,6 +254,7 @@ export class Hud {
     else if (c.assignment?.kind === 'governor') status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">governing ${esc(s.planets[c.at].name)}</span>`;
     else status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">${esc(s.planets[c.at].name)}</span>`;
     const skills = `<span class="sub" title="Diplomacy / Espionage / Sabotage / Leadership">D${c.diplomacy} E${c.espionage} S${c.sabotage} L${c.leadership}</span>`;
+    const trait = c.name === 'Mon Mothma' ? `<div class="sub" style="font-style:italic">Voice of the Alliance: while free, every non-Imperial world drifts +1 loyalty a day${c.captured || c.dead ? ' (silenced)' : ''}</div>` : '';
     let buttons = '';
     if (withButtons && isIdle(c)) {
       const canRecruit = roster(s, c.faction).length < ROSTER_CAP[c.faction];
@@ -268,7 +269,7 @@ export class Hud {
     } else if (withButtons && c.assignment && !c.captured && !c.dead) {
       buttons = `<div class="missions"><button class="small" data-action="relieve" data-char="${c.id}">Relieve of duty</button></div>`;
     }
-    return `<div class="row"><span><b>${esc(c.title)} ${esc(c.name)}</b> ${skills}</span>${status}</div>${buttons}`;
+    return `<div class="row"><span><b>${esc(c.title)} ${esc(c.name)}</b> ${skills}</span>${status}</div>${trait}${buttons}`;
   }
 
   private renderPlanet(s: GameState, p: Planet, target: TargetMode): string {

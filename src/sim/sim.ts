@@ -300,8 +300,11 @@ function substep(s: GameState, dt: number): void {
   s.hours += dt;
   for (const f of FACTIONS) s.dayIncome[f] = factionIncome(s, f);
 
+  // Mon Mothma's voice: while she is alive and free, every world not under Imperial rule drifts toward the Alliance
+  const mothma = s.characters.find(c => c.name === 'Mon Mothma' && !c.dead && !c.captured);
   // economy + production + loyalty
   for (const p of s.planets) {
+    if (mothma && p.owner !== 'empire') shiftLoyalty(p, 'rebellion', dt / HOURS_PER_DAY);
     for (const f of FACTIONS) if (p.intel[f] > 0) p.intel[f] = Math.max(0, p.intel[f] - dt);
     if (p.owner) {
       const blockaded = isBlockaded(s, p);

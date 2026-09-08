@@ -42,7 +42,9 @@ npm run build      # typecheck + production bundle in dist/
   escape or are freed when their world is liberated. Instead of missions, a leader can be assigned
   to **govern** a world (faster loyalty, harder for enemy agents) or **command** a fleet (leadership
   improves gunnery and retreats in battle). Recruited leaders can die when their flagship is lost;
-  the headline characters cannot.
+  the headline characters cannot. While Mon Mothma is alive and free, every world not under
+  Imperial rule drifts one loyalty point a day toward the Alliance, which makes capturing her a
+  strategic goal for the Empire.
 - **Invasion.** Clear the orbit, then land regiments from a fleet with transport capacity.
 - **Fog of war.** Enemy fleets are visible only near your worlds, fleets and agents, or via intel.
 - **Battles** can be auto-resolved or fought in the tactical view: fully 3D, starfighters fly in
