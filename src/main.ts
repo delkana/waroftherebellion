@@ -6,7 +6,7 @@ import { BattleView } from './battle/battleView';
 import { Hud, type TargetMode } from './ui/hud';
 import { generateGalaxy } from './sim/galaxyGen';
 import { applyBattleResult, autoResolve, gatherBattle, type BattleSetup } from './sim/combat';
-import { cancelBuild, enqueueBuild, buildOptions, orderInvade, orderMerge, orderMission, orderMove, orderSplit, orderStop, step, transferTroops, log } from './sim/sim';
+import { cancelBuild, enqueueBuild, buildOptions, orderInvade, orderMerge, orderMission, orderMove, orderSplit, orderStop, step, transferTroops, log, missionProblem, assignGovernor, assignCommander, relieve } from './sim/sim';
 import { findPath } from './sim/pathfinding';
 import type { FactionId, GameState } from './sim/types';
 
@@ -67,7 +67,11 @@ const galaxyCallbacks = {
     if (!state) return;
     if (target) {
       const ch = state.characters.find(c => c.id === target!.charId);
-      if (ch && orderMission(state, ch, target.type, id)) log(state, `${ch.title} ${ch.name} dispatched: ${target.type} on ${state.planets[id].name}`, 'info', state.player, id);
+      if (ch) {
+        const problem = missionProblem(state, ch, target.type, id);
+        if (problem) { log(state, `${ch.title} ${ch.name}: ${problem}`, 'bad', state.player, id); return; }
+        if (orderMission(state, ch, target.type, id)) log(state, `${ch.title} ${ch.name} dispatched: ${target.type} on ${state.planets[id].name}`, 'info', state.player, id);
+      }
       setTarget(null);
       return;
     }
@@ -143,6 +147,9 @@ const hud = new Hud(document.getElementById('hud')!, {
     else setTarget({ kind: 'mission', charId, type });
   },
   cancelTarget() { setTarget(null); },
+  govern(charId) { if (state && !state.observer) { const c = state.characters.find(x => x.id === charId); if (c) assignGovernor(state, c); } },
+  board(charId, fleetId) { if (state && !state.observer) { const c = state.characters.find(x => x.id === charId); const f = state.fleets.find(x => x.id === fleetId); if (c && f) assignCommander(state, c, f); } },
+  relieve(charId) { if (state && !state.observer) { const c = state.characters.find(x => x.id === charId); if (c) relieve(state, c); } },
   invade(fleetId) { if (state) { const f = state.fleets.find(x => x.id === fleetId); if (f) orderInvade(state, f); } },
   merge(intoId, fromId) {
     if (!state) return;
@@ -164,10 +171,17 @@ const hud = new Hud(document.getElementById('hud')!, {
   autoResolve() {
     if (!state || !state.pendingBattle) return;
     const setup = gatherBattle(state, state.pendingBattle);
-    applyBattleResult(state, setup, autoResolve(setup));
-    hud.hideModal();
+    const result = autoResolve(setup);
+    const logStart = state.log.length;
+    applyBattleResult(state, setup, result);
+    // leader fates and other consequences logged during resolution become the report's notes
+    const notes = state.log.slice(logStart).filter(e => !e.text.startsWith('Battle of')).map(e => e.text);
     promptShown = false;
     setSelection({ kind: 'planet', id: setup.planet });
+    hud.showBattleSummary(state, setup, result, notes);
+  },
+  closeSummary() {
+    if (!state) return;
     if (!state.pendingBattle) setSpeed(lastSpeed);
   },
   newGame(faction: FactionId | 'observer', seed: number) {

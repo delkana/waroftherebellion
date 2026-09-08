@@ -63,7 +63,7 @@ export interface Fleet {
   travel: Travel | null;
 }
 
-export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite';
+export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite' | 'recruit' | 'rescue';
 export interface Mission {
   type: MissionType;
   target: number;
@@ -84,6 +84,13 @@ export interface Character {
   sabotage: number;
   leadership: number;
   captured: boolean;
+  /** Hours spent in captivity (drives interrogation and escape rolls). */
+  captivity?: number;
+  /** Headline characters cannot die; recruited ones can. */
+  minor?: boolean;
+  dead?: boolean;
+  /** Standing duty instead of missions: commanding a fleet, or governing the world they are on. */
+  assignment?: { kind: 'fleet'; fleetId: number } | { kind: 'governor' } | null;
 }
 
 export interface Faction {

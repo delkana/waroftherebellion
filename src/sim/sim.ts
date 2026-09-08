@@ -52,8 +52,23 @@ export function factionIncome(s: GameState, f: FactionId): number {
 }
 export function ownedPlanets(s: GameState, f: FactionId): Planet[] { return s.planets.filter(p => p.owner === f); }
 export function charactersAt(s: GameState, planetId: number, faction?: FactionId): Character[] {
-  return s.characters.filter(c => c.at === planetId && !c.captured && !c.mission && (!faction || c.faction === faction));
+  return s.characters.filter(c => c.at === planetId && !c.captured && !c.dead && !c.mission && (!faction || c.faction === faction) && charIsPresent(s, c));
 }
+/** A commander aboard a fleet in hyperspace is nowhere in particular. */
+export function charIsPresent(s: GameState, c: Character): boolean {
+  if (c.assignment?.kind !== 'fleet') return true;
+  const f = s.fleets.find(x => x.id === (c.assignment as { fleetId: number }).fleetId);
+  return !!f && f.at !== null;
+}
+export function fleetCommander(s: GameState, fleetId: number): Character | undefined {
+  return s.characters.find(c => c.assignment?.kind === 'fleet' && c.assignment.fleetId === fleetId && !c.captured && !c.dead);
+}
+export function governorOf(s: GameState, planetId: number): Character | undefined {
+  return s.characters.find(c => c.assignment?.kind === 'governor' && c.at === planetId && !c.captured && !c.dead);
+}
+export function roster(s: GameState, f: FactionId): Character[] { return s.characters.filter(c => c.faction === f && !c.dead); }
+export const ROSTER_CAP: Record<FactionId, number> = { empire: 11, rebellion: 18 };
+export function isIdle(c: Character): boolean { return !c.captured && !c.dead && !c.mission && !c.assignment; }
 export function shiftLoyalty(p: Planet, toward: FactionId, amount: number): void {
   p.loyalty += toward === 'rebellion' ? amount : -amount;
   p.loyalty = Math.max(-100, Math.min(100, p.loyalty));
@@ -106,6 +121,7 @@ export function orderMerge(s: GameState, into: Fleet, from: Fleet): boolean {
   if (into.id === from.id || into.faction !== from.faction || into.at === null || into.at !== from.at) return false;
   into.ships.push(...from.ships);
   into.troops += from.troops;
+  for (const c of s.characters) if (c.assignment?.kind === 'fleet' && c.assignment.fleetId === from.id) c.assignment = fleetCommander(s, into.id) ? null : { kind: 'fleet', fleetId: into.id };
   s.fleets = s.fleets.filter(f => f.id !== from.id);
   return true;
 }
@@ -139,17 +155,82 @@ export function transferTroops(s: GameState, fleet: Fleet, amount: number): bool
   return true;
 }
 
-export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36 };
-export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising' };
+export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36, recruit: 48, rescue: 24 };
+export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising', recruit: 'Recruit', rescue: 'Rescue' };
 export const MISSION_DESC: Record<MissionType, string> = {
   diplomacy: 'Raise the planet\'s loyalty to your cause. Neutral planets join you at high loyalty.',
   espionage: 'Reveal enemy fleets, garrisons and production. The Empire may locate the hidden Rebel base.',
   sabotage: 'Destroy construction progress, defense platforms or shipyards; damage ships in orbit.',
   incite: 'Stir unrest on an enemy world. Low-garrison planets with hostile populations revolt.',
+  recruit: 'Find a new leader on one of your worlds or a sympathetic neutral. The Rebellion finds them more easily.',
+  rescue: 'Break a captured leader out of an enemy world. Risky; sabotage and espionage help.',
 };
 
+/** Why a mission cannot target a planet, or null if it can. */
+export function missionProblem(s: GameState, ch: Character, type: MissionType, target: number): string | null {
+  const p = s.planets[target];
+  switch (type) {
+    case 'recruit':
+      if (roster(s, ch.faction).length >= ROSTER_CAP[ch.faction]) return 'Roster is full';
+      if (p.owner !== ch.faction && !(p.owner === null && alignment(p, ch.faction) > 0)) return 'Needs one of your worlds or a sympathetic neutral';
+      return null;
+    case 'rescue':
+      if (!s.characters.some(c => c.faction === ch.faction && c.captured && !c.dead && c.at === target)) return 'No captured leader is held there';
+      return null;
+    case 'incite': case 'sabotage':
+      if (p.owner === ch.faction) return 'That is your own world';
+      return null;
+    default: return null;
+  }
+}
+
+const REBEL_RECRUITS: [string, string, number, number, number, number][] = [
+  ['Wedge Antilles', 'Commander', 1, 2, 3, 4], ['Crix Madine', 'General', 2, 3, 4, 4], ['Jan Dodonna', 'General', 2, 2, 1, 4],
+  ['Garm Bel Iblis', 'Senator', 4, 2, 2, 3], ['Carlist Rieekan', 'General', 2, 2, 2, 4], ['Lando Calrissian', 'Baron', 4, 3, 3, 2],
+  ['Chewbacca', 'Warrior', 1, 2, 4, 3], ['Hera Syndulla', 'Captain', 2, 3, 2, 4], ['Kanan Jarrus', 'Knight', 3, 3, 3, 3],
+  ['Sabine Wren', 'Specialist', 1, 3, 5, 2], ['Cassian Andor', 'Captain', 2, 5, 4, 2], ['Jyn Erso', 'Sergeant', 1, 3, 4, 2],
+  ['Saw Gerrera', 'Partisan', 1, 2, 5, 3], ['Bail Organa', 'Senator', 5, 2, 1, 2], ['Nien Nunb', 'Pilot', 1, 3, 2, 2],
+  ['Wes Janson', 'Lieutenant', 1, 2, 2, 3], ['Biggs Darklighter', 'Lieutenant', 1, 2, 2, 3], ['Kyle Katarn', 'Agent', 1, 4, 5, 2],
+  ['Winter Celchu', 'Agent', 3, 5, 2, 1], ['Bren Derlin', 'Major', 1, 2, 2, 3], ['Ezra Bridger', 'Padawan', 2, 4, 3, 2],
+  ['Zeb Orrelios', 'Captain', 1, 1, 4, 3], ['Cham Syndulla', 'General', 3, 2, 3, 4], ['Borsk Fey\'lya', 'Councillor', 4, 4, 1, 1],
+];
+const IMPERIAL_RECRUITS: [string, string, number, number, number, number][] = [
+  ['Thrawn', 'Grand Admiral', 3, 4, 1, 5], ['Veers', 'General', 1, 2, 2, 5], ['Ozzel', 'Admiral', 1, 1, 1, 3],
+  ['Jerjerrod', 'Moff', 3, 2, 1, 3], ['Motti', 'Admiral', 2, 1, 1, 3], ['Needa', 'Captain', 1, 2, 1, 3],
+  ['Daala', 'Admiral', 1, 2, 2, 4], ['Pellaeon', 'Captain', 2, 2, 1, 4], ['Krennic', 'Director', 2, 4, 3, 2],
+  ['Kallus', 'Agent', 1, 5, 3, 2], ['Pryce', 'Governor', 3, 3, 1, 2], ['Yularen', 'Colonel', 2, 5, 2, 3],
+  ['Mara Jade', 'Emperor\'s Hand', 2, 5, 5, 2], ['Boba Fett', 'Bounty Hunter', 1, 4, 5, 2], ['Zsinj', 'Warlord', 1, 2, 2, 4],
+];
+
+// ---------------------------------------------------------------- assignments
+export function assignGovernor(s: GameState, ch: Character): boolean {
+  if (!isIdle(ch) || s.planets[ch.at].owner !== ch.faction) return false;
+  if (governorOf(s, ch.at)) return false;
+  ch.assignment = { kind: 'governor' };
+  return true;
+}
+export function assignCommander(s: GameState, ch: Character, fleet: Fleet): boolean {
+  if (!isIdle(ch) || fleet.faction !== ch.faction || fleet.at !== ch.at) return false;
+  if (fleetCommander(s, fleet.id)) return false;
+  ch.assignment = { kind: 'fleet', fleetId: fleet.id };
+  return true;
+}
+export function relieve(s: GameState, ch: Character): void {
+  if (ch.assignment?.kind === 'fleet') {
+    const id = ch.assignment.fleetId;
+    const f = s.fleets.find(x => x.id === id);
+    if (f && f.at !== null) ch.at = f.at;
+  }
+  ch.assignment = null;
+}
+/** Leadership of the commander aboard any of these fleets (0 if none). */
+export function commandBonus(s: GameState, fleets: Fleet[]): number {
+  return fleets.reduce((m, f) => Math.max(m, fleetCommander(s, f.id)?.leadership ?? 0), 0);
+}
+
 export function orderMission(s: GameState, ch: Character, type: MissionType, target: number): boolean {
-  if (ch.captured || ch.mission) return false;
+  if (!isIdle(ch)) return false;
+  if (missionProblem(s, ch, type, target)) return false;
   const path = findPath(s.lanes, ch.at, target);
   if (!path) return false;
   const travel = pathLength(s.lanes, path) / COURIER_SPEED;
@@ -160,6 +241,7 @@ export function orderMission(s: GameState, ch: Character, type: MissionType, tar
 export function recallCharacter(s: GameState, ch: Character): void {
   if (ch.mission && ch.mission.phase === 'travel') ch.mission = null;
 }
+export function captives(s: GameState, f: FactionId): Character[] { return s.characters.filter(c => c.faction === f && c.captured && !c.dead); }
 
 // ---------------------------------------------------------------- building
 export function buildOptions(s: GameState, p: Planet): BuildItem[] {
@@ -232,7 +314,8 @@ function substep(s: GameState, dt: number): void {
         }
       }
       // loyalty drift toward owner, faster with garrison
-      shiftLoyalty(p, p.owner, dt / HOURS_PER_DAY * (0.6 + 0.2 * Math.min(p.garrison, 4)));
+      const gov = governorOf(s, p.id);
+      shiftLoyalty(p, p.owner, dt / HOURS_PER_DAY * (0.6 + 0.2 * Math.min(p.garrison, 4) + (gov ? 0.4 * gov.diplomacy : 0)));
       const a = alignment(p, p.owner);
       if (a < -50) {
         p.unrest += dt * (1 + (-a - 50) / 25);
@@ -278,9 +361,16 @@ function substep(s: GameState, dt: number): void {
   }
   s.fleets = s.fleets.filter(f => f.ships.length > 0);
 
-  // characters
+  // characters: commanders ride their fleets, captives are interrogated, missions progress
   for (const c of s.characters) {
-    if (!c.mission || c.captured) continue;
+    if (c.dead) continue;
+    if (c.assignment?.kind === 'fleet') {
+      const f = s.fleets.find(x => x.id === (c.assignment as { fleetId: number }).fleetId);
+      if (!f) c.assignment = null;
+      else if (f.at !== null) c.at = f.at;
+    }
+    if (c.captured) { tickCaptivity(s, c, dt); continue; }
+    if (!c.mission) continue;
     c.mission.hoursLeft -= dt;
     if (c.mission.hoursLeft > 0) continue;
     if (c.mission.phase === 'travel') {
@@ -332,7 +422,7 @@ function uprising(s: GameState, p: Planet): void {
 function resolveInvasion(s: GameState, p: Planet): void {
   const inv = p.invasion!;
   p.invasion = null;
-  const leaders = s.characters.filter(c => c.faction === inv.attacker && c.at === p.id && !c.captured && !c.mission);
+  const leaders = s.characters.filter(c => c.faction === inv.attacker && c.at === p.id && !c.captured && !c.dead && !c.mission && charIsPresent(s, c));
   const leadBonus = leaders.reduce((m, c) => Math.max(m, c.leadership), 0) * 0.06;
   const att = inv.troops * (1 + leadBonus) * rng.range(0.85, 1.15);
   const def = p.garrison * 1.3 * rng.range(0.85, 1.15) + (p.owner ? (alignment(p, p.owner) + 100) / 200 * 0.5 : 0);
@@ -343,7 +433,7 @@ function resolveInvasion(s: GameState, p: Planet): void {
     p.queue = []; p.unrest = 0;
     shiftLoyalty(p, inv.attacker, -12);
     for (const c of s.characters.filter(c => prev && c.faction === prev && c.at === p.id && !c.captured && !c.mission)) {
-      if (rng.chance(0.5)) { c.captured = true; log(s, `${c.title} ${c.name} was captured on ${p.name}`, c.faction === s.player ? 'bad' : 'good', 'all', p.id); }
+      if (rng.chance(0.5)) { captureCharacter(s, c, p.id); log(s, `${c.title} ${c.name} was captured on ${p.name}`, c.faction === s.player ? 'bad' : 'good', 'all', p.id); }
       else evacuate(s, c);
     }
     log(s, `${factionName(inv.attacker)} forces have taken ${p.name}`, inv.attacker === s.player ? 'good' : 'bad', 'all', p.id);
@@ -371,10 +461,14 @@ function resolveMission(s: GameState, c: Character): void {
   const p = s.planets[m.target];
   const enemy = enemyOf(c.faction);
   const hostile = p.owner === enemy;
-  const skill = m.type === 'diplomacy' || m.type === 'incite' ? c.diplomacy : m.type === 'espionage' ? c.espionage : c.sabotage;
+  const skill = m.type === 'diplomacy' || m.type === 'incite' || m.type === 'recruit' ? c.diplomacy : m.type === 'espionage' ? c.espionage : m.type === 'rescue' ? Math.max(c.sabotage, c.espionage) : c.sabotage;
   let chance = 0.3 + skill * 0.11;
   if (hostile) chance -= p.garrison * 0.04;
   chance -= charactersAt(s, p.id, enemy).length * 0.1;
+  const gov = governorOf(s, p.id);
+  if (gov && gov.faction === enemy) chance -= 0.06 * gov.espionage;
+  if (m.type === 'recruit') chance = 0.2 + skill * 0.08 + (c.faction === 'rebellion' ? 0.15 : 0) + Math.max(0, alignment(p, c.faction)) / 250;
+  if (m.type === 'rescue') chance = 0.15 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
   chance = Math.max(0.1, Math.min(0.95, chance));
   const success = rng.chance(chance);
   const who = `${c.title} ${c.name}`;
@@ -405,6 +499,26 @@ function resolveMission(s: GameState, c: Character): void {
         log(s, `${who}: sabotage on ${p.name} ${what}`, mine ? 'good' : 'bad', 'all', p.id);
         break;
       }
+      case 'recruit': {
+        const pool = c.faction === 'rebellion' ? REBEL_RECRUITS : IMPERIAL_RECRUITS;
+        const taken = new Set(s.characters.map(x => x.name));
+        const avail = pool.filter(x => !taken.has(x[0]));
+        if (!avail.length || roster(s, c.faction).length >= ROSTER_CAP[c.faction]) { log(s, `${who}: found no one worth recruiting on ${p.name}`, 'info', c.faction, p.id); break; }
+        const [name, title, d, e, sb, l] = rng.pick(avail);
+        s.characters.push({ id: s.nextId++, name, title, faction: c.faction, at: p.id, mission: null, diplomacy: d, espionage: e, sabotage: sb, leadership: l, captured: false, minor: true, assignment: null });
+        log(s, `${who} recruited ${title} ${name} on ${p.name}`, mine ? 'good' : 'info', 'all', p.id);
+        break;
+      }
+      case 'rescue': {
+        const captive = s.characters.find(x => x.faction === c.faction && x.captured && !x.dead && x.at === p.id);
+        if (captive) {
+          captive.captured = false; captive.captivity = 0;
+          log(s, `${who} rescued ${captive.title} ${captive.name} from ${p.name}!`, mine ? 'good' : 'bad', 'all', p.id);
+          evacuate(s, captive);
+          evacuate(s, c);
+        }
+        break;
+      }
       case 'incite': {
         shiftLoyalty(p, c.faction, 10 + skill * 2);
         p.unrest += 48;
@@ -414,15 +528,50 @@ function resolveMission(s: GameState, c: Character): void {
       }
     }
   } else {
-    const captureChance = hostile ? (m.type === 'diplomacy' ? 0.1 : 0.3) : 0.03;
+    const captureChance = hostile ? (m.type === 'diplomacy' ? 0.1 : m.type === 'rescue' ? 0.4 : 0.3) : (m.type === 'recruit' ? 0 : 0.03);
     if (rng.chance(captureChance)) {
-      c.captured = true;
+      c.captured = true; c.captivity = 0; c.assignment = null;
       log(s, `${who} was captured on ${p.name}!`, mine ? 'bad' : 'good', 'all', p.id);
     } else {
       if (m.type === 'diplomacy') shiftLoyalty(p, c.faction, 3);
       log(s, `${who}: ${MISSION_LABEL[m.type].toLowerCase()} on ${p.name} failed`, mine ? 'bad' : 'info', c.faction, p.id);
     }
   }
+}
+
+/** Captives are interrogated by whoever holds the world; they can also slip away. */
+function tickCaptivity(s: GameState, c: Character, dt: number): void {
+  const p = s.planets[c.at];
+  const captor = p.owner;
+  if (captor === c.faction) { // the world changed hands: freed
+    c.captured = false; c.captivity = 0;
+    log(s, `${c.title} ${c.name} was freed when ${p.name} was liberated`, c.faction === s.player ? 'good' : 'bad', 'all', p.id);
+    return;
+  }
+  const before = Math.floor((c.captivity ?? 0) / 24);
+  c.captivity = (c.captivity ?? 0) + dt;
+  if (Math.floor(c.captivity / 24) === before) return; // one roll per day in custody
+  const mine = c.faction === s.player;
+  if (rng.chance(0.02 + 0.015 * c.sabotage)) {
+    c.captured = false; c.captivity = 0;
+    log(s, `${c.title} ${c.name} escaped from custody on ${p.name}!`, mine ? 'good' : 'bad', 'all', p.id);
+    evacuate(s, c);
+    return;
+  }
+  if (!captor) return;
+  if (rng.chance(0.1)) {
+    if (c.faction === 'rebellion' && !s.factions.empire.knowsEnemyHq) {
+      s.factions.empire.knowsEnemyHq = true;
+      log(s, `Under interrogation, ${c.title} ${c.name} revealed the location of the Rebel base: ${s.planets[s.factions.rebellion.hq].name}!`, s.player === 'empire' ? 'good' : 'bad', 'all', p.id);
+    } else {
+      for (const q of s.planets) if (q.owner === c.faction) q.intel[captor] = Math.max(q.intel[captor], 72);
+      log(s, `${c.title} ${c.name} talked: ${factionName(captor)} intelligence now covers ${factionName(c.faction)} worlds for three days`, captor === s.player ? 'good' : 'bad', 'all', p.id);
+    }
+  }
+}
+
+export function captureCharacter(s: GameState, c: Character, planetId: number): void {
+  c.captured = true; c.captivity = 0; c.assignment = null; c.mission = null; c.at = planetId;
 }
 
 export function factionName(f: FactionId): string { return f === 'empire' ? 'Empire' : 'Rebellion'; }

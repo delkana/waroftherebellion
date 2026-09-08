@@ -71,13 +71,14 @@ export function generateGalaxy(opts: GenOptions): GameState {
     if (p.owner === 'rebellion') p.loyalty = Math.max(p.loyalty, 35);
   }
   const empireHq = planets.findIndex(p => p.name === 'Coruscant');
-  // the hidden base: usually Yavin, sometimes one of the other Rebel worlds
-  const hqPool = ['Yavin', 'Yavin', 'Yavin', 'Dantooine', 'Dantooine', 'Toprawa'];
+  // the hidden base: a random remote world; Hoth or Endor join the Alliance if chosen
+  const hqPool = ['Yavin', 'Dantooine', 'Toprawa', 'Mon Calamari', 'Sullust', 'Hoth', 'Endor'];
   const hqName = r.pick(hqPool);
   const rebelHq = planets.findIndex(p => p.name === hqName);
   const cap = planets[empireHq];
   cap.loyalty = -90;
   const rebHq = planets[rebelHq];
+  rebHq.owner = 'rebellion';
   rebHq.shipyard = Math.max(rebHq.shipyard, 2); rebHq.defense = Math.max(rebHq.defense, 1); rebHq.garrison = Math.max(rebHq.garrison, 4); rebHq.loyalty = 90;
 
   const state: GameState = {
@@ -106,16 +107,16 @@ export function generateGalaxy(opts: GenOptions): GameState {
   const ch = (name: string, title: string, faction: FactionId, at: number, d: number, e: number, s: number, l: number): Character =>
     ({ id: state.nextId++, name, title, faction, at, mission: null, diplomacy: d, espionage: e, sabotage: s, leadership: l, captured: false });
   state.characters.push(
-    ch('Palpatine', 'Emperor', 'empire', empireHq, 5, 3, 1, 3),
-    ch('Darth Vader', 'Lord', 'empire', empireHq, 2, 3, 4, 5),
-    ch('Tarkin', 'Grand Moff', 'empire', byName('Eriadu'), 4, 3, 1, 4),
-    ch('Piett', 'Admiral', 'empire', byName('Kuat'), 1, 2, 2, 4),
-    ch('Ysanne Isard', 'Director', 'empire', empireHq, 2, 5, 4, 1),
-    ch('Mon Mothma', 'Chancellor', 'rebellion', rebelHq, 5, 2, 1, 2),
-    ch('Leia Organa', 'Princess', 'rebellion', rebelHq, 5, 3, 2, 3),
-    ch('Luke Skywalker', 'Commander', 'rebellion', rebelHq, 3, 3, 4, 4),
-    ch('Han Solo', 'Captain', 'rebellion', rebelHq, 2, 4, 5, 3),
-    ch('Ackbar', 'Admiral', 'rebellion', byName('Mon Calamari'), 1, 2, 1, 5),
+    ch('Palpatine', 'Emperor', 'empire', empireHq, 5, 4, 2, 4),
+    ch('Darth Vader', 'Lord', 'empire', empireHq, 3, 4, 5, 5),
+    ch('Tarkin', 'Grand Moff', 'empire', byName('Eriadu'), 5, 3, 2, 5),
+    ch('Piett', 'Admiral', 'empire', byName('Kuat'), 2, 3, 2, 5),
+    ch('Ysanne Isard', 'Director', 'empire', empireHq, 3, 5, 5, 2),
+    ch('Mon Mothma', 'Chancellor', 'rebellion', rebelHq, 5, 3, 1, 3),
+    ch('Leia Organa', 'Princess', 'rebellion', rebelHq, 5, 4, 3, 4),
+    ch('Luke Skywalker', 'Commander', 'rebellion', rebelHq, 3, 4, 5, 5),
+    ch('Han Solo', 'Captain', 'rebellion', rebelHq, 3, 5, 5, 4),
+    ch('Ackbar', 'Admiral', 'rebellion', byName('Mon Calamari'), 3, 2, 2, 5),
   );
   return state;
 }

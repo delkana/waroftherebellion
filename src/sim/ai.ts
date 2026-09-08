@@ -1,7 +1,7 @@
 import { classesFor, classStrength, shipClass } from './ships';
 import { enemyOf, type BuildItem, type FactionId, type Fleet, type GameState, type Planet } from './types';
 import { hopDistances, findPath, pathLength } from './pathfinding';
-import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment } from './sim';
+import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP } from './sim';
 
 export function runAI(s: GameState, f: FactionId): void {
   const enemy = enemyOf(f);
@@ -136,9 +136,29 @@ export function runAI(s: GameState, f: FactionId): void {
   }
 
   // ---- characters ----
-  const idle = s.characters.filter(c => c.faction === f && !c.captured && !c.mission);
-  const keepHome = idle.filter(c => c.at === hq.id).sort((a, b) => b.leadership - a.leadership)[0];
-  for (const c of idle) {
+  const idle = s.characters.filter(c => c.faction === f && isIdle(c));
+  // best leader takes command of the strongest fleet sitting with them
+  for (const c of idle.slice().sort((a, b) => b.leadership - a.leadership)) {
+    if (c.leadership < 3) break;
+    const here = fleetsAt(s, c.at, f).filter(fl => !fleetCommander(s, fl.id) && fleetStrength(fl) >= 40).sort((a, b) => fleetStrength(b) - fleetStrength(a))[0];
+    if (here && assignCommander(s, c, here)) break;
+  }
+  const idle2 = s.characters.filter(c => c.faction === f && isIdle(c));
+  // rescue captives
+  for (const cap of captives(s, f)) {
+    const rescuer = idle2.filter(c => Math.max(c.sabotage, c.espionage) >= 3 && !missionProblem(s, c, 'rescue', cap.at)).sort((a, b) => Math.max(b.sabotage, b.espionage) - Math.max(a.sabotage, a.espionage))[0];
+    if (rescuer && rng.chance(0.5)) { orderMission(s, rescuer, 'rescue', cap.at); idle2.splice(idle2.indexOf(rescuer), 1); }
+  }
+  // recruit while the roster has room
+  if (roster(s, f).length < ROSTER_CAP[f]) {
+    const rec = idle2.filter(c => c.diplomacy >= 2).sort((a, b) => b.diplomacy - a.diplomacy)[0];
+    if (rec && rng.chance(f === 'rebellion' ? 0.5 : 0.3)) {
+      const t = s.planets.filter(p => !missionProblem(s, rec, 'recruit', p.id)).sort((a, b) => alignment(b, f) - alignment(a, f))[0];
+      if (t) { orderMission(s, rec, 'recruit', t.id); idle2.splice(idle2.indexOf(rec), 1); }
+    }
+  }
+  const keepHome = idle2.filter(c => c.at === hq.id).sort((a, b) => b.leadership - a.leadership)[0];
+  for (const c of idle2) {
     if (c === keepHome) continue;
     const hops = hopDistances(s.lanes, c.at);
     const nearPlanets = s.planets.filter(p => (hops.get(p.id) ?? 99) <= 4);

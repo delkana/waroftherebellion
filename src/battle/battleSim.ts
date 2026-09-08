@@ -194,7 +194,7 @@ export class BattleSim {
   cmdRetreat(side: FactionId): void {
     if (this.retreating[side]) return;
     this.retreating[side] = true;
-    this.retreatTimer[side] = 12; // seconds until hyperspace jump
+    this.retreatTimer[side] = Math.max(6, 12 - this.setup.command[side] * 0.9); // seconds until hyperspace jump; a good admiral gets the fleet out faster
     for (const u of this.alive(side)) if (u.cls.speed > 0) u.order = { type: 'retreat' };
   }
 
@@ -382,7 +382,7 @@ export class BattleSim {
   private fire(u: BUnit, w: WeaponDef, t: BUnit): void {
     const mult = sizeMult(w, t.cls);
     const rel = t.vel.clone().sub(u.vel).length();
-    let hitChance = t.cls.size === 'small' ? 0.35 : t.cls.size === 'medium' ? 0.7 : 0.9;
+    let hitChance = (t.cls.size === 'small' ? 0.35 : t.cls.size === 'medium' ? 0.7 : 0.9) * (1 + 0.025 * this.setup.command[u.side]);
     hitChance *= Math.max(0.35, 1 - rel / 90);
     if (t.cls.size === 'small' && t.strafe === 'break') hitChance *= 0.5; // hard to hit on the break-away
     if (w.kind === 'torpedo') hitChance = t.cls.size === 'small' ? 0.25 : 0.9;

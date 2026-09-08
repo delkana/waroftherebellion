@@ -1,5 +1,5 @@
-import type { BattleSetup } from '../sim/combat';
-import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay } from '../sim/sim';
+import type { BattleSetup, BattleResult } from '../sim/combat';
+import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives } from '../sim/sim';
 import { shipClass } from '../sim/ships';
 import { fmtTime, type Character, type FactionId, type Fleet, type GameState, type MissionType, type Planet } from '../sim/types';
 import { canSeeDetails, canSeeFleet, knowsHq } from '../sim/visibility';
@@ -18,6 +18,9 @@ export interface HudActions {
   build(planetId: number, kind: string, cls?: string): void;
   cancelBuild(planetId: number, idx: number): void;
   startMission(charId: number, type: MissionType): void;
+  govern(charId: number): void;
+  board(charId: number, fleetId: number): void;
+  relieve(charId: number): void;
   cancelTarget(): void;
   invade(fleetId: number): void;
   merge(intoId: number, fromId: number): void;
@@ -39,6 +42,7 @@ export interface HudActions {
   battleFormation(f: Formation): void;
   battleMute(): void;
   battleReturn(): void;
+  closeSummary(): void;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -87,6 +91,9 @@ export class Hud {
       case 'build': this.a.build(num('planet'), d.kind!, d.cls); break;
       case 'cancel': this.a.cancelBuild(num('planet'), num('idx')); break;
       case 'mission': this.a.startMission(num('char'), d.type as MissionType); break;
+      case 'govern': this.a.govern(num('char')); break;
+      case 'board': this.a.board(num('char'), num('fleet')); break;
+      case 'relieve': this.a.relieve(num('char')); break;
       case 'cancelTarget': this.a.cancelTarget(); break;
       case 'invade': this.a.invade(num('fleet')); break;
       case 'merge': this.a.merge(num('into'), num('from')); break;
@@ -110,6 +117,7 @@ export class Hud {
       case 'bmute': this.a.battleMute(); break;
       case 'breturn': this.a.battleReturn(); break;
       case 'closeModal': this.hideModal(); break;
+      case 'closeSummary': this.hideModal(); this.a.closeSummary(); break;
     }
   }
 
@@ -229,22 +237,34 @@ export class Hud {
       <div class="sub">Select a planet or fleet on the map. Right-click a planet with a fleet selected to send it there.</div>
       <h3>Fleets</h3>
       ${fleets.map(f => `<div class="row clickable" data-action="selectFleet" data-id="${f.id}"><span>${esc(f.name)}</span><span class="sub">${f.ships.length} ships · ${f.at !== null ? esc(s.planets[f.at].name) : '→ ' + esc(s.planets[f.travel!.to].name)}</span></div>`).join('') || '<div class="sub">No fleets</div>'}
-      <h3>Leaders</h3>
-      ${chars.map(c => this.charRow(s, c, null, false)).join('')}
+      <h3>Leaders (${roster(s, me).length} / ${ROSTER_CAP[me]})</h3>
+      ${chars.filter(c => !c.dead).map(c => this.charRow(s, c, null, false)).join('')}
       <h3>Worlds</h3>
       ${s.planets.filter(p => p.owner === me).sort((a, b) => b.production - a.production).map(p => `<div class="row clickable" data-action="selectPlanet" data-id="${p.id}"><span>${esc(p.name)}${p.shipyard ? ` <span class="sub">yard ${p.shipyard}</span>` : ''}</span><span class="sub">${planetIncomePerDay(s, p).toFixed(0)}/day${p.queue.length ? ` · building ${esc(p.queue[0].label)}` : ''}</span></div>`).join('')}`;
   }
 
   private charRow(s: GameState, c: Character, target: TargetMode, withButtons: boolean): string {
     let status = '';
-    if (c.captured) status = `<span class="bad">captured on ${esc(s.planets[c.at].name)}</span>`;
+    if (c.dead) status = `<span class="bad">killed in action</span>`;
+    else if (c.captured) status = `<span class="bad">captured on ${esc(s.planets[c.at].name)} (${Math.floor((c.captivity ?? 0) / 24)}d)</span>`;
     else if (c.mission) status = `<span class="sub">${MISSION_LABEL[c.mission.type]} ${c.mission.phase === 'travel' ? 'en route to' : 'on'} ${esc(s.planets[c.mission.target].name)} (${hrs(c.mission.hoursLeft)})</span>`;
+    else if (c.assignment?.kind === 'fleet') { const fl = s.fleets.find(x => x.id === (c.assignment as { fleetId: number }).fleetId); status = `<span class="sub clickable" data-action="selectFleet" data-id="${fl?.id}">commanding ${esc(fl?.name ?? 'fleet')}</span>`; }
+    else if (c.assignment?.kind === 'governor') status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">governing ${esc(s.planets[c.at].name)}</span>`;
     else status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">${esc(s.planets[c.at].name)}</span>`;
     const skills = `<span class="sub" title="Diplomacy / Espionage / Sabotage / Leadership">D${c.diplomacy} E${c.espionage} S${c.sabotage} L${c.leadership}</span>`;
     let buttons = '';
-    if (withButtons && !c.captured && !c.mission) {
-      buttons = `<div class="missions">${(['diplomacy', 'espionage', 'sabotage', 'incite'] as MissionType[]).map(t =>
-        `<button class="small ${target && target.charId === c.id && target.type === t ? 'active' : ''}" data-action="mission" data-char="${c.id}" data-type="${t}" title="${esc(MISSION_DESC[t])}">${MISSION_LABEL[t]}</button>`).join('')}</div>`;
+    if (withButtons && isIdle(c)) {
+      const canRecruit = roster(s, c.faction).length < ROSTER_CAP[c.faction];
+      const canRescue = captives(s, c.faction).length > 0;
+      const types = (['diplomacy', 'espionage', 'sabotage', 'incite', 'recruit', 'rescue'] as MissionType[]).filter(t => (t !== 'recruit' || canRecruit) && (t !== 'rescue' || canRescue));
+      buttons = `<div class="missions">${types.map(t =>
+        `<button class="small ${target && target.charId === c.id && target.type === t ? 'active' : ''}" data-action="mission" data-char="${c.id}" data-type="${t}" title="${esc(MISSION_DESC[t])}">${MISSION_LABEL[t]}</button>`).join('')}`;
+      const p = s.planets[c.at];
+      if (p.owner === c.faction && !governorOf(s, p.id)) buttons += `<button class="small" data-action="govern" data-char="${c.id}" title="Govern this world: loyalty grows faster and enemy agents find it harder to operate">Govern</button>`;
+      for (const fl of fleetsAt(s, c.at, c.faction).filter(x => !fleetCommander(s, x.id))) buttons += `<button class="small" data-action="board" data-char="${c.id}" data-fleet="${fl.id}" title="Command this fleet: leadership improves gunnery and retreats">Command ${esc(fl.name)}</button>`;
+      buttons += `</div>`;
+    } else if (withButtons && c.assignment && !c.captured && !c.dead) {
+      buttons = `<div class="missions"><button class="small" data-action="relieve" data-char="${c.id}">Relieve of duty</button></div>`;
     }
     return `<div class="row"><span><b>${esc(c.title)} ${esc(c.name)}</b> ${skills}</span>${status}</div>${buttons}`;
   }
@@ -267,6 +287,8 @@ export class Hud {
         <span class="sub">Garrison</span><span>${details ? `${p.garrison} regiment${p.garrison === 1 ? '' : 's'}` : '?'}</span>
         ${p.intel[me] > 0 && !mine ? `<span class="sub">Intel</span><span>${hrs(p.intel[me])} remaining</span>` : ''}
       </div>`;
+    const gov = governorOf(s, p.id);
+    if (gov && (gov.faction === me || details)) html += `<div class="row"><span class="sub">Governor</span><span class="${gov.faction}">${esc(gov.title)} ${esc(gov.name)}</span></div>`;
     if (p.invasion) html += `<div class="row"><span class="${p.invasion.attacker === me ? 'good' : 'bad'}">${factionName(p.invasion.attacker)} invasion: ${p.invasion.troops} regiments</span><span class="sub">${hrs(p.invasion.hoursLeft)}</span></div>`;
     if (p.unrest > 24 && details) html += `<div class="row bad">Unrest is building (${Math.floor(p.unrest / 24)} days)</div>`;
 
@@ -294,7 +316,7 @@ export class Hud {
 
     // characters
     const chars = charactersAt(s, p.id).filter(c => c.faction === me || details);
-    const captured = s.characters.filter(c => c.captured && c.at === p.id && (c.faction === me || details));
+    const captured = s.characters.filter(c => c.captured && !c.dead && c.at === p.id && (c.faction === me || details));
     if (chars.length || captured.length) {
       html += `<h3>Leaders present</h3>` + chars.map(c => this.charRow(s, c, target, c.faction === me && !s.observer)).join('') + captured.map(c => this.charRow(s, c, null, false)).join('');
     }
@@ -316,7 +338,8 @@ export class Hud {
     }
     let html = `<h2 class="${f.faction}">${esc(f.name)}</h2>
       <div class="sub">${fac(f.faction)} · ${where}</div>
-      <div class="grid"><span class="sub">Strength</span><span>${fleetStrength(f).toFixed(0)}</span>
+      <div class="grid"><span class="sub">Commander</span><span>${(() => { const c = fleetCommander(s, f.id); return c ? `${esc(c.title)} ${esc(c.name)} <span class="sub">L${c.leadership}</span>` : '<span class="sub">none</span>'; })()}</span>
+      <span class="sub">Strength</span><span>${fleetStrength(f).toFixed(0)}</span>
       <span class="sub">Troops</span><span>${f.troops} / ${fleetTroopCap(f)}</span></div>
       <h3>Ships</h3><div class="ships">`;
     for (const [cls, g] of groups) {
@@ -353,9 +376,31 @@ export class Hud {
     this.el('modal').innerHTML = `<div class="box panel">
       <h2>Battle of ${esc(p.name)}</h2>
       <p>${factionName(setup.attacker)} forces have entered orbit${p.owner ? ` of a ${factionName(p.owner)} world` : ''}.</p>
-      <div class="forces"><div><h4 class="${setup.attacker}">${factionName(setup.attacker)} (attacking)</h4><div>${side(setup.attacker)}</div></div>
-      <div><h4 class="${setup.defender}">${factionName(setup.defender)} (defending)</h4><div>${side(setup.defender)}</div></div></div>
+      <div class="forces"><div><h4 class="${setup.attacker}">${factionName(setup.attacker)} (attacking)</h4><div>${side(setup.attacker)}${setup.commanderNames[setup.attacker] ? `<br><i>${esc(setup.commanderNames[setup.attacker]!)} commanding</i>` : ''}</div></div>
+      <div><h4 class="${setup.defender}">${factionName(setup.defender)} (defending)</h4><div>${side(setup.defender)}${setup.commanderNames[setup.defender] ? `<br><i>${esc(setup.commanderNames[setup.defender]!)} commanding</i>` : ''}</div></div></div>
       <div class="buttons"><button data-action="auto">Auto-resolve</button>${s.observer ? '<button class="primary" data-action="watch">Watch battle</button>' : '<button class="primary" data-action="fight">Take command</button>'}</div></div>`;
+    this.el('modal').classList.add('show');
+  }
+  /** Report shown after an auto-resolved battle. */
+  showBattleSummary(s: GameState, setup: BattleSetup, result: BattleResult, notes: string[]): void {
+    const p = s.planets[setup.planet];
+    const lost = (f: FactionId) => {
+      const counts = new Map<string, number>();
+      for (const u of setup.units.filter(u => u.faction === f && !result.survivors.has(u.id))) counts.set(u.cls.name, (counts.get(u.cls.name) ?? 0) + 1);
+      return [...counts].map(([n, k]) => `${k}× ${n}`).join('<br>') || '<i>no losses</i>';
+    };
+    const survivors = (f: FactionId) => setup.units.filter(u => u.faction === f && result.survivors.has(u.id)).length;
+    const headline = result.winner ? `${factionName(result.winner)} victory` : 'Inconclusive';
+    const detail = result.retreated ? `${factionName(result.retreated)} forces withdrew to hyperspace.` : result.winner ? `${factionName(result.winner)} forces hold the orbit.` : '';
+    this.el('modal').innerHTML = `<div class="box panel">
+      <h2>Battle of ${esc(p.name)}: ${headline}</h2>
+      <p>${detail}</p>
+      <div class="forces">
+        <div><h4 class="${setup.attacker}">${factionName(setup.attacker)} (attacking)</h4><div><b>Lost</b><br>${lost(setup.attacker)}<br><span style="color:#8a98a8">${survivors(setup.attacker)} ships remain</span></div></div>
+        <div><h4 class="${setup.defender}">${factionName(setup.defender)} (defending)</h4><div><b>Lost</b><br>${lost(setup.defender)}<br><span style="color:#8a98a8">${survivors(setup.defender)} ships remain</span></div></div>
+      </div>
+      ${notes.length ? `<p>${notes.map(esc).join('<br>')}</p>` : ''}
+      <div class="buttons"><button class="primary" data-action="closeSummary">Continue</button></div></div>`;
     this.el('modal').classList.add('show');
   }
   showGameOver(s: GameState): void {

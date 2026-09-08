@@ -28,14 +28,22 @@ npm run build      # typecheck + production bundle in dist/
   pre-Yavin strongholds (Yavin, Dantooine, Mon Calamari, Sullust, Toprawa); the other 44 worlds are
   neutral, leaning by canon sympathy (Alderaan, Chandrila, Kashyyyk, Ryloth toward the Rebellion;
   Kamino, Mustafar, Muunilinst, Scarif toward the Empire). Starting worlds are scattered, not
-  contiguous, and the hidden base is usually Yavin but sometimes Dantooine or Toprawa.
+  contiguous, and the hidden base is a random remote world (Yavin, Dantooine, Toprawa, Mon Calamari,
+  Sullust, Hoth or Endor).
 - **Hyperlanes.** A sparse, non-crossing web of lanes; fleets travel only along them on shortest paths. Arriving at a system
   with enemy warships or enemy-owned defense platforms triggers a battle.
 - **Planets** have loyalty (-100 Empire ... +100 Rebellion) that drives income, uprisings, and
   whether neutral worlds join a side. Owned worlds build ships, troop regiments, shipyard
   upgrades (levels 1-3 gate ship classes) and orbital defense platforms.
 - **Leaders** run missions: Diplomacy, Espionage (reveals a system; Imperial agents can locate
-  the Rebel base), Sabotage, Incite Uprising. Failed missions on enemy worlds risk capture.
+  the Rebel base), Sabotage, Incite Uprising, Recruit (find new leaders on your worlds or
+  sympathetic neutrals; the Rebellion recruits more easily and has a larger roster) and Rescue
+  (break a captured leader out). Failed missions on enemy worlds risk capture. Captives are
+  interrogated daily: a Rebel captive may give up the base's location, and captives sometimes
+  escape or are freed when their world is liberated. Instead of missions, a leader can be assigned
+  to **govern** a world (faster loyalty, harder for enemy agents) or **command** a fleet (leadership
+  improves gunnery and retreats in battle). Recruited leaders can die when their flagship is lost;
+  the headline characters cannot.
 - **Invasion.** Clear the orbit, then land regiments from a fleet with transport capacity.
 - **Fog of war.** Enemy fleets are visible only near your worlds, fleets and agents, or via intel.
 - **Battles** can be auto-resolved or fought in the tactical view: fully 3D, starfighters fly in

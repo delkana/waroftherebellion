@@ -1,4 +1,4 @@
-import { rng, log, factionName, fleetStrength, ownedPlanets, orderMove } from './sim';
+import { rng, log, factionName, fleetStrength, ownedPlanets, orderMove, commandBonus, fleetCommander, captureCharacter } from './sim';
 import { shipClass, type ShipClass } from './ships';
 import { enemyOf, type FactionId, type Fleet, type GameState, type PendingBattle } from './types';
 import { findPath, pathLength } from './pathfinding';
@@ -18,6 +18,9 @@ export interface BattleSetup {
   defender: FactionId;
   units: BattleUnitSpec[];
   fleets: Fleet[];
+  /** Leadership of the best commander present on each side (0 if none). */
+  command: Record<FactionId, number>;
+  commanderNames: Record<FactionId, string | null>;
 }
 
 export interface BattleResult {
@@ -36,7 +39,9 @@ export function gatherBattle(s: GameState, pb: PendingBattle): BattleSetup {
   if (planet.owner && planet.owner !== pb.attacker) {
     for (let i = 0; i < planet.defense; i++) units.push({ id: -(i + 1), cls: shipClass('platform'), faction: planet.owner, hull: 1, fleetId: null });
   }
-  return { planet: pb.planet, attacker: pb.attacker, defender, units, fleets };
+  const command: Record<FactionId, number> = { empire: commandBonus(s, fleets.filter(f => f.faction === 'empire')), rebellion: commandBonus(s, fleets.filter(f => f.faction === 'rebellion')) };
+  const nameOf = (f: FactionId) => { for (const fl of fleets.filter(x => x.faction === f)) { const c = fleetCommander(s, fl.id); if (c) return `${c.title} ${c.name}`; } return null; };
+  return { planet: pb.planet, attacker: pb.attacker, defender, units, fleets, command, commanderNames: { empire: nameOf('empire'), rebellion: nameOf('rebellion') } };
 }
 
 export function sideStrength(units: BattleUnitSpec[], f: FactionId): number {
@@ -60,7 +65,7 @@ export function autoResolve(setup: BattleSetup): BattleResult {
           const t = theirs[Math.floor(rng.next() * theirs.length)];
           if (!t.alive) continue;
           const mult = t.spec.cls.size === 'small' ? w.vsSmall : t.spec.cls.size === 'medium' ? (w.vsSmall + w.vsLarge) / 2 : w.vsLarge;
-          let dmg = w.dmg * w.count * (ROUND / w.cooldown) * mult * 0.55 * rng.range(0.7, 1.3);
+          let dmg = w.dmg * w.count * (ROUND / w.cooldown) * mult * 0.55 * rng.range(0.7, 1.3) * (1 + 0.03 * setup.command[f]);
           const sd = Math.min(t.shield, dmg); t.shield -= sd; dmg -= sd;
           t.hp -= dmg;
           if (t.hp <= 0) t.alive = false;
@@ -106,6 +111,17 @@ export function applyBattleResult(s: GameState, setup: BattleSetup, result: Batt
     lost[f.faction] += before - f.ships.length;
     if (f.ships.length === 0) f.troops = 0;
   }
+  for (const f of setup.fleets) {
+    if (f.ships.length) continue;
+    const c = fleetCommander(s, f.id);
+    if (!c) continue;
+    c.assignment = null; c.at = setup.planet;
+    const enemyHolds = s.fleets.some(x => x.faction !== c.faction && x.at === setup.planet && x.ships.length > 0) || (planet.owner && planet.owner !== c.faction);
+    const mine = c.faction === s.player;
+    if (c.minor && rng.chance(0.5)) { c.dead = true; log(s, `${c.title} ${c.name} went down with the ${f.name}`, mine ? 'bad' : 'good', 'all', setup.planet); }
+    else if (enemyHolds && rng.chance(0.5)) { captureCharacter(s, c, setup.planet); log(s, `${c.title} ${c.name} was captured in the wreckage of the ${f.name}`, mine ? 'bad' : 'good', 'all', setup.planet); }
+    else { log(s, `${c.title} ${c.name} escaped the destruction of the ${f.name}`, mine ? 'info' : 'info', 'all', setup.planet); retreatCharacter(s, c); }
+  }
   const platformsLost = setup.units.filter(u => u.id < 0 && !result.survivors.has(u.id)).length;
   if (platformsLost) planet.defense = Math.max(0, planet.defense - platformsLost);
   s.fleets = s.fleets.filter(f => f.ships.length > 0);
@@ -123,6 +139,16 @@ export function applyBattleResult(s: GameState, setup: BattleSetup, result: Batt
   const factionsPresent = new Set(s.fleets.filter(f => f.at === setup.planet).map(f => f.faction));
   if (factionsPresent.size > 1) s.pendingBattle = { planet: setup.planet, attacker: setup.attacker };
   else if (planet.owner && planet.defense > 0 && factionsPresent.size === 1 && !factionsPresent.has(planet.owner)) s.pendingBattle = { planet: setup.planet, attacker: [...factionsPresent][0] };
+}
+
+function retreatCharacter(s: GameState, c: { faction: FactionId; at: number }): void {
+  const own = ownedPlanets(s, c.faction).filter(p => p.id !== c.at);
+  let best: number | null = null, bestLen = Infinity;
+  for (const p of own) {
+    const path = findPath(s.lanes, c.at, p.id);
+    if (path) { const l = pathLength(s.lanes, path); if (l < bestLen) { bestLen = l; best = p.id; } }
+  }
+  if (best !== null) c.at = best;
 }
 
 export function retreatFleet(s: GameState, f: Fleet): void {

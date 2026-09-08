@@ -7,7 +7,7 @@ export function hasPresence(s: GameState, viewer: FactionId, planetId: number): 
   const p = s.planets[planetId];
   if (p.owner === viewer) return true;
   if (s.fleets.some(f => f.faction === viewer && f.at === planetId)) return true;
-  if (s.characters.some(c => c.faction === viewer && !c.captured && c.at === planetId && (!c.mission || c.mission.phase === 'work'))) return true;
+  if (s.characters.some(c => c.faction === viewer && !c.captured && !c.dead && c.at === planetId && (!c.mission || c.mission.phase === 'work') && !(c.assignment?.kind === 'fleet' && !s.fleets.some(f => f.id === (c.assignment as { fleetId: number }).fleetId && f.at === planetId)))) return true;
   return false;
 }
 
