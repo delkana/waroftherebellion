@@ -1,60 +1,35 @@
 import { Rng } from '../core/rng';
-import type { Character, FactionId, Fleet, GameState, Lane, Planet, PlanetType, Ship } from './types';
+import type { Character, FactionId, Fleet, GameState, Lane, Planet, Ship } from './types';
 import { findPath, hopDistances, pathLength } from './pathfinding';
+import { CANON_WORLDS } from './canonWorlds';
 
-interface World { name: string; type: PlanetType; prod: number }
-const W = (name: string, type: PlanetType, prod: number): World => ({ name, type, prod });
+export interface GenOptions { seed: number; player: FactionId }
 
-/** Core worlds: named from the capital outward, so the Imperial heartland reads right. */
-const CORE: World[] = [
-  W('Corellia', 'terran', 13), W('Kuat', 'terran', 14), W('Alderaan', 'terran', 12), W('Chandrila', 'terran', 11),
-  W('Fondor', 'barren', 11), W('Brentaal', 'terran', 10), W('Eriadu', 'terran', 10), W('Rendili', 'barren', 10),
-  W('Byss', 'terran', 9), W('Commenor', 'terran', 9), W('Duro', 'barren', 9), W('Anaxes', 'terran', 9),
-  W('Kamino', 'ocean', 9), W('Cato Neimoidia', 'terran', 9), W('Carida', 'barren', 8), W('Mygeeto', 'ice', 8),
-  W('Balmorra', 'barren', 9), W('Corulag', 'terran', 9),
-];
-/** Classic hidden-base worlds; the Rebel HQ takes one of these names. */
-const REBEL_BASES: World[] = [W('Yavin', 'jungle', 7), W('Hoth', 'ice', 4), W('Dantooine', 'terran', 6)];
-/** Outer worlds for the rim and the neutrals. */
-const RIM: World[] = [
-  W('Mon Cala', 'ocean', 12), W('Sullust', 'volcanic', 9), W('Bothawui', 'terran', 9), W('Naboo', 'terran', 10),
-  W('Bespin', 'gas', 9), W('Kashyyyk', 'jungle', 8), W('Mandalore', 'desert', 8), W('Sluis Van', 'barren', 8),
-  W('Taris', 'city', 8), W('Lothal', 'terran', 7), W('Nal Hutta', 'jungle', 7), W('Ord Mantell', 'terran', 7),
-  W('Mustafar', 'volcanic', 7), W('Scarif', 'ocean', 7), W('Onderon', 'jungle', 7), W('Malastare', 'terran', 7),
-  W('Ryloth', 'desert', 6), W('Kessel', 'barren', 6), W('Utapau', 'desert', 6), W('Rodia', 'jungle', 6),
-  W('Bakura', 'terran', 6), W('Geonosis', 'desert', 6), W('Endor', 'jungle', 5), W('Felucia', 'jungle', 5),
-  W('Dathomir', 'jungle', 5), W('Bestine', 'desert', 5), W('Tatooine', 'desert', 4), W('Jedha', 'desert', 4),
-  W('Ilum', 'ice', 3), W('Dagobah', 'jungle', 2), W('Jakku', 'desert', 2), W('Polis Massa', 'barren', 3),
-  W('Nar Shaddaa', 'city', 8), W('Kalist', 'barren', 4), W('Ando', 'ocean', 5), W('Dorin', 'gas', 5),
-];
+const MAP_RADIUS = 118;   // game units from the map centre to the farthest world
+const MIN_SPACING = 11;    // worlds that share a grid square get nudged apart to at least this
 
-export interface GenOptions { seed: number; player: FactionId; planetCount?: number }
-
+/**
+ * Builds the galaxy from the canon layout in canonWorlds.ts. The map itself is fixed;
+ * the seed only affects which Rebel stronghold hides the headquarters, the small
+ * loyalty and garrison variance, and the AI's dice.
+ */
 export function generateGalaxy(opts: GenOptions): GameState {
   const r = new Rng(opts.seed);
-  const N = Math.min(opts.planetCount ?? 38, 1 + CORE.length + REBEL_BASES.length + RIM.length);
 
-  // ---- positions: even scatter across a disc, denser toward the core ----
-  const planets: Planet[] = [];
-  const R = 112;
-  let attempts = 0;
-  while (planets.length < N && attempts < 20000) {
-    attempts++;
-    let pos;
-    if (planets.length === 0) pos = { x: 0, y: 0, z: 0 };
-    else {
-      const rad = 16 + Math.pow(r.next(), 0.72) * (R - 16);
-      const ang = r.next() * Math.PI * 2;
-      pos = { x: rad * Math.cos(ang), y: r.range(-1, 1) * (2.5 + rad * 0.05), z: rad * Math.sin(ang) };
-    }
-    if (planets.some(p => dist3(p.pos, pos) < 17)) continue;
-    planets.push({
-      id: planets.length, name: `System ${planets.length}`, pos, type: 'barren', radius: r.range(1.1, 2.2),
-      owner: null, loyalty: 0, production: 5,
-      shipyard: 0, defense: 0, garrison: r.int(0, 2), queue: [], invasion: null, unrest: 0,
-      intel: { empire: 0, rebellion: 0 },
-    });
-  }
+  // ---- positions: canon coordinates, centred and scaled, with a little vertical scatter ----
+  const cx = CANON_WORLDS.reduce((s, w) => s + w.x, 0) / CANON_WORLDS.length;
+  const cy = CANON_WORLDS.reduce((s, w) => s + w.y, 0) / CANON_WORLDS.length;
+  const far = Math.max(...CANON_WORLDS.map(w => Math.hypot(w.x - cx, w.y - cy)));
+  const scale = MAP_RADIUS / far;
+  const planets: Planet[] = CANON_WORLDS.map((w, i) => ({
+    id: i, name: w.name,
+    pos: { x: (w.x - cx) * scale, y: hashNoise(w.name) * 5, z: -(w.y - cy) * scale }, // galactic north = -z
+    type: w.type, radius: w.type === 'city' ? 2.1 : 1.2 + (w.production / 16) * 0.9,
+    owner: w.owner, loyalty: 0, production: w.production,
+    shipyard: w.shipyard, defense: w.defense, garrison: w.garrison,
+    queue: [], invasion: null, unrest: 0, intel: { empire: 0, rebellion: 0 },
+  }));
+  relax(planets);
 
   // ---- hyperlanes: short, non-crossing, no redundant links (a sparse planar web) ----
   const lanes: Lane[] = [];
@@ -62,7 +37,7 @@ export function generateGalaxy(opts: GenOptions): GameState {
   const pairs: { a: number; b: number; d: number }[] = [];
   for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
     const d = dist3(planets[i].pos, planets[j].pos);
-    if (d < 60) pairs.push({ a: i, b: j, d });
+    if (d < 70) pairs.push({ a: i, b: j, d });
   }
   pairs.sort((x, y) => x.d - y.d);
   const crosses = (a: number, b: number) => lanes.some(l => {
@@ -77,8 +52,7 @@ export function generateGalaxy(opts: GenOptions): GameState {
     lanes.push({ a, b, length: d });
     deg[a]++; deg[b]++;
   }
-  // connectivity (rare): stitch isolated islands to the nearest reached world
-  for (let guard = 0; guard < 50; guard++) {
+  for (let guard = 0; guard < 80; guard++) {
     const seen = hopDistances(lanes, 0);
     const missing = planets.filter(p => !seen.has(p.id));
     if (!missing.length) break;
@@ -89,79 +63,43 @@ export function generateGalaxy(opts: GenOptions): GameState {
     lanes.push({ a: best[0], b: best[1], length: best[2] });
   }
 
-  // ---- ownership ----
-  const empireHq = 0;
-  const hopsFromCapital = hopDistances(lanes, empireHq);
-  const byHops = [...planets].sort((a, b) => (hopsFromCapital.get(a.id)! - hopsFromCapital.get(b.id)!) || (dist3(a.pos, planets[0].pos) - dist3(b.pos, planets[0].pos)));
-  const empireCount = Math.round(N * 0.3);
-  for (let i = 0; i < empireCount; i++) byHops[i].owner = 'empire';
-
-  // Rebel region: the far rim, never within three jumps of the capital
-  const maxHops = Math.max(...planets.map(p => hopsFromCapital.get(p.id) ?? 0));
-  const farRim = planets.filter(p => p.owner === null && (hopsFromCapital.get(p.id) ?? 0) >= maxHops - 1)
-    .sort((a, b) => dist3(b.pos, planets[0].pos) - dist3(a.pos, planets[0].pos));
-  const rebelSeed = farRim[r.int(0, Math.min(2, farRim.length - 1))];
-  const hopsFromRebel = hopDistances(lanes, rebelSeed.id);
-  const rebelCandidates = planets.filter(p => p.owner === null && (hopsFromCapital.get(p.id) ?? 0) >= Math.min(4, maxHops - 2))
-    .sort((a, b) => ((hopsFromRebel.get(a.id) ?? 99) - (hopsFromRebel.get(b.id) ?? 99)) || (dist3(a.pos, rebelSeed.pos) - dist3(b.pos, rebelSeed.pos)));
-  const rebelCount = Math.round(N * 0.16);
-  const rebelPlanets = rebelCandidates.slice(0, rebelCount);
-  for (const p of rebelPlanets) p.owner = 'rebellion';
-  const rebelHq = r.pick(rebelPlanets).id;
-
-  // ---- names & types: core names spiral out from Coruscant, rim names everywhere else ----
-  const core = r.shuffle([...CORE]);
-  const rim = r.shuffle([...RIM]);
-  const bases = r.shuffle([...REBEL_BASES]);
-  const assign = (p: Planet, w: World) => { p.name = w.name; p.type = w.type; p.production = w.prod; };
-  assign(planets[0], W('Coruscant', 'city', 16));
-  assign(planets[rebelHq], bases.shift()!);
-  for (const p of byHops) {
-    if (p.id === 0 || p.id === rebelHq) continue;
-    if (p.owner === 'empire' && core.length) assign(p, core.shift()!);
-    else if (rim.length) assign(p, rim.shift()!);
-    else if (bases.length) assign(p, bases.shift()!);
-    else assign(p, core.shift() ?? W(`Outpost ${p.id}`, 'barren', 3));
-  }
-
+  // ---- loyalty from canon sympathies, HQs ----
   for (const p of planets) {
-    const hops = hopsFromCapital.get(p.id) ?? 6;
-    if (p.owner === 'empire') { p.loyalty = r.int(-75, -35); p.garrison = r.int(1, 2); }
-    else if (p.owner === 'rebellion') { p.loyalty = r.int(35, 75); p.garrison = r.int(1, 2); }
-    else { p.loyalty = Math.round(r.range(-30, 30) + (hops - 3) * 8); p.garrison = r.int(0, 2); }
-    p.loyalty = Math.max(-100, Math.min(100, p.loyalty));
-    if (p.owner === null && r.chance(0.2)) p.shipyard = 1;
+    const w = CANON_WORLDS[p.id];
+    p.loyalty = Math.max(-100, Math.min(100, Math.round(w.lean * 70 + r.range(-12, 12))));
+    if (p.owner === 'empire') p.loyalty = Math.min(p.loyalty, -35);
+    if (p.owner === 'rebellion') p.loyalty = Math.max(p.loyalty, 35);
   }
+  const empireHq = planets.findIndex(p => p.name === 'Coruscant');
+  // the hidden base: usually Yavin, sometimes one of the other Rebel worlds
+  const hqPool = ['Yavin', 'Yavin', 'Yavin', 'Dantooine', 'Dantooine', 'Toprawa'];
+  const hqName = r.pick(hqPool);
+  const rebelHq = planets.findIndex(p => p.name === hqName);
   const cap = planets[empireHq];
-  cap.shipyard = 3; cap.defense = 2; cap.garrison = 6; cap.loyalty = -85; cap.radius = 2.3;
+  cap.loyalty = -90;
   const rebHq = planets[rebelHq];
-  rebHq.shipyard = 3; rebHq.defense = 1; rebHq.garrison = 4; rebHq.production = Math.max(rebHq.production, 9); rebHq.loyalty = 85;
-  // secondary yards: Kuat is the Empire's great shipyard when it is in play
-  const empOthers = planets.filter(p => p.owner === 'empire' && p.id !== empireHq).sort((a, b) => (b.name === 'Kuat' ? 100 : b.production) - (a.name === 'Kuat' ? 100 : a.production));
-  if (empOthers[0]) empOthers[0].shipyard = 2;
-  if (empOthers[1]) empOthers[1].shipyard = 1;
-  if (empOthers[2]) empOthers[2].shipyard = 1;
-  const rebOthers = rebelPlanets.filter(p => p.id !== rebelHq).sort((a, b) => (b.name === 'Mon Cala' ? 100 : b.production) - (a.name === 'Mon Cala' ? 100 : a.production));
-  if (rebOthers[0]) rebOthers[0].shipyard = 2;
-  if (rebOthers[1]) rebOthers[1].shipyard = 1;
+  rebHq.shipyard = Math.max(rebHq.shipyard, 2); rebHq.defense = Math.max(rebHq.defense, 1); rebHq.garrison = Math.max(rebHq.garrison, 4); rebHq.loyalty = 90;
 
   const state: GameState = {
     seed: opts.seed, hours: 0, speed: 0, player: opts.player,
     planets, lanes, fleets: [], characters: [],
     factions: {
-      empire: { id: 'empire', name: 'Galactic Empire', credits: 900, hq: empireHq, knowsEnemyHq: false, isAI: opts.player !== 'empire' },
-      rebellion: { id: 'rebellion', name: 'Rebel Alliance', credits: 700, hq: rebelHq, knowsEnemyHq: true, isAI: opts.player !== 'rebellion' },
+      empire: { id: 'empire', name: 'Galactic Empire', credits: 1000, hq: empireHq, knowsEnemyHq: false, isAI: opts.player !== 'empire' },
+      rebellion: { id: 'rebellion', name: 'Rebel Alliance', credits: 800, hq: rebelHq, knowsEnemyHq: true, isAI: opts.player !== 'rebellion' },
     },
     log: [], nextId: 1000, pendingBattle: null, winner: null, aiTimer: 0,
     dayIncome: { empire: 0, rebellion: 0 },
   };
 
   // ---- starting fleets ----
+  const byName = (n: string) => planets.find(p => p.name === n)!.id;
   const mk = (cls: string, n: number): Ship[] => Array.from({ length: n }, () => ({ id: state.nextId++, cls, hull: 1 }));
-  addFleet(state, 'empire', 'Death Squadron', empireHq, [...mk('victory', 2), ...mk('lancer', 2), ...mk('tie', 6), ...mk('tiebomber', 2), ...mk('acclamator', 1)], 4);
-  if (empOthers[0]) addFleet(state, 'empire', 'Sector Patrol', empOthers[0].id, [...mk('lancer', 2), ...mk('tie', 4)], 0);
-  addFleet(state, 'rebellion', 'Alliance Fleet', rebelHq, [...mk('nebulon', 1), ...mk('cr90', 2), ...mk('xwing', 6), ...mk('ywing', 3), ...mk('gr75', 1)], 3);
-  if (rebOthers[0]) addFleet(state, 'rebellion', 'Rogue Group', rebOthers[0].id, [...mk('cr90', 1), ...mk('xwing', 4)], 0);
+  addFleet(state, 'empire', 'Death Squadron', empireHq, [...mk('victory', 2), ...mk('lancer', 2), ...mk('tie', 8), ...mk('tiebomber', 2), ...mk('acclamator', 1)], 4);
+  addFleet(state, 'empire', 'Kuat Sector Fleet', byName('Kuat'), [...mk('victory', 1), ...mk('lancer', 2), ...mk('tie', 4)], 0);
+  addFleet(state, 'empire', 'Rim Patrol', byName('Eriadu'), [...mk('lancer', 1), ...mk('tie', 4)], 0);
+  addFleet(state, 'rebellion', 'Alliance Fleet', rebelHq, [...mk('nebulon', 1), ...mk('cr90', 2), ...mk('xwing', 8), ...mk('ywing', 4), ...mk('gr75', 1)], 3);
+  addFleet(state, 'rebellion', 'Home One Group', byName('Mon Calamari'), [...mk('mc80', 1), ...mk('cr90', 1), ...mk('xwing', 4)], 2);
+  addFleet(state, 'rebellion', 'Rogue Group', byName('Sullust'), [...mk('cr90', 1), ...mk('xwing', 4)], 0);
 
   // ---- characters ----
   const ch = (name: string, title: string, faction: FactionId, at: number, d: number, e: number, s: number, l: number): Character =>
@@ -169,16 +107,42 @@ export function generateGalaxy(opts: GenOptions): GameState {
   state.characters.push(
     ch('Palpatine', 'Emperor', 'empire', empireHq, 5, 3, 1, 3),
     ch('Darth Vader', 'Lord', 'empire', empireHq, 2, 3, 4, 5),
-    ch('Tarkin', 'Grand Moff', 'empire', empireHq, 4, 3, 1, 4),
-    ch('Piett', 'Admiral', 'empire', empireHq, 1, 2, 2, 4),
+    ch('Tarkin', 'Grand Moff', 'empire', byName('Eriadu'), 4, 3, 1, 4),
+    ch('Piett', 'Admiral', 'empire', byName('Kuat'), 1, 2, 2, 4),
     ch('Ysanne Isard', 'Director', 'empire', empireHq, 2, 5, 4, 1),
     ch('Mon Mothma', 'Chancellor', 'rebellion', rebelHq, 5, 2, 1, 2),
     ch('Leia Organa', 'Princess', 'rebellion', rebelHq, 5, 3, 2, 3),
     ch('Luke Skywalker', 'Commander', 'rebellion', rebelHq, 3, 3, 4, 4),
     ch('Han Solo', 'Captain', 'rebellion', rebelHq, 2, 4, 5, 3),
-    ch('Ackbar', 'Admiral', 'rebellion', rebelHq, 1, 2, 1, 5),
+    ch('Ackbar', 'Admiral', 'rebellion', byName('Mon Calamari'), 1, 2, 1, 5),
   );
   return state;
+}
+
+/** Push worlds that share a grid square apart until none are closer than MIN_SPACING (in the map plane). */
+function relax(planets: Planet[]): void {
+  for (let iter = 0; iter < 80; iter++) {
+    let moved = false;
+    for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
+      const a = planets[i].pos, b = planets[j].pos;
+      let dx = b.x - a.x, dz = b.z - a.z;
+      let d = Math.hypot(dx, dz);
+      if (d >= MIN_SPACING) continue;
+      if (d < 1e-3) { dx = Math.cos(i * 2.4 + j); dz = Math.sin(i * 2.4 + j); d = 1; }
+      const push = (MIN_SPACING - d) / 2 + 0.05;
+      a.x -= dx / d * push; a.z -= dz / d * push;
+      b.x += dx / d * push; b.z += dz / d * push;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+}
+
+/** Deterministic -1..1 noise from a string, so the vertical scatter is stable across games. */
+function hashNoise(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return ((h >>> 0) % 2000) / 1000 - 1;
 }
 
 export function addFleet(s: GameState, faction: FactionId, name: string, at: number, ships: Ship[], troops: number): Fleet {

@@ -267,8 +267,14 @@ export class GalaxyView {
     o.begin();
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 4);
 
-    // --- planets ---
-    for (const p of s.planets) {
+    // --- planets (labels decluttered: important ones first, overlapping ones skipped) ---
+    const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const priority = (p: typeof s.planets[number]) => {
+      const sel = this.selection?.kind === 'planet' && this.selection.id === p.id;
+      if (sel || this.hoverPlanet === p.id) return 1000;
+      return (knowsHq(s, me, p.id) ? 300 : 0) + (p.owner === me ? 100 : p.owner ? 50 : 0) + p.production;
+    };
+    for (const p of [...s.planets].sort((a, b) => priority(b) - priority(a))) {
       const pr = o.project(p.pos, cam);
       if (!pr.visible) continue;
       const r = this.screenRadius(p.radius, p.pos);
@@ -282,7 +288,11 @@ export class GalaxyView {
       const hq = knowsHq(s, me, p.id);
       let label = p.name;
       if (hq) label = (p.id === s.factions.empire.hq ? '★ ' : '◆ ') + label;
-      o.text(label, pr.x, pr.y + r + 11, { size: selected || hovered ? 13 : 11.5, color: ownerCol, bold: selected || hq });
+      const fontSize = selected || hovered ? 13 : 11.5;
+      const lw = label.length * fontSize * 0.56 + 6, lh = fontSize + 4;
+      const rect = { x0: pr.x - lw / 2, y0: pr.y + r + 11 - lh / 2, x1: pr.x + lw / 2, y1: pr.y + r + 11 + lh / 2 };
+      const clash = placed.some(q => rect.x0 < q.x1 && rect.x1 > q.x0 && rect.y0 < q.y1 && rect.y1 > q.y0);
+      if (!clash) { placed.push(rect); o.text(label, pr.x, pr.y + r + 11, { size: fontSize, color: ownerCol, bold: selected || hq }); }
       // small status glyphs
       const details = canSeeDetails(s, me, p);
       let gy = pr.y + r + 24;

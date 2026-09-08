@@ -232,6 +232,8 @@ window.addEventListener('keydown', e => {
 
 // ------------------------------------------------------------------ main loop
 const STEP = 1 / 60;
+/** Game hours per real second at 1x speed (2 real seconds = 1 game hour). */
+const HOURS_PER_REAL_SECOND = 0.5;
 let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -244,7 +246,7 @@ function tick(dt: number): void {
   const cw = overlayCanvas.clientWidth, chh = overlayCanvas.clientHeight;
   if (cw > 0 && chh > 0 && (cw !== overlay.width || chh !== overlay.height)) resize();
   if (mode === 'galaxy' && state && galaxy) {
-    if (!state.pendingBattle && !state.winner) step(state, dt * state.speed);
+    if (!state.pendingBattle && !state.winner) step(state, dt * state.speed * HOURS_PER_REAL_SECOND);
     if (state.pendingBattle && !promptShown) { promptShown = true; state.speed = 0; hud.showBattlePrompt(state, gatherBattle(state, state.pendingBattle)); }
     if (state.winner && !gameOverShown) { gameOverShown = true; state.speed = 0; hud.showGameOver(state); }
     // route preview while a fleet is selected and hovering a planet

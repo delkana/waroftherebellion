@@ -19,8 +19,16 @@ npm run build      # typecheck + production bundle in dist/
 - **Two factions.** The Galactic Empire holds the Core Worlds and Coruscant. The Rebel Alliance holds a handful of rim worlds and a **hidden headquarters**.
   The Empire wins by capturing the HQ (it must first find it with espionage); the Rebellion wins
   by taking Coruscant.
-- **Real time with speed control.** 1 real second = 1 game hour at 1x. Pause, 1x/2x/4x/8x.
+- **Real time with speed control.** 2 real seconds = 1 game hour at 1x. Pause, 1x/2x/4x/8x.
   The game pauses automatically when a battle starts.
+- **Canon galaxy.** 61 worlds placed on the real Star Wars galactic grid (positions from the
+  swgalaxymap.com / *Essential Atlas* coordinates via the community Space Engine sheet, see
+  `src/sim/canonWorlds.ts`). The Empire starts with its twelve entrenched Core and industrial
+  strongholds (Coruscant, Kuat, Corellia, Fondor, Carida, Byss...), the Rebellion with its five
+  pre-Yavin strongholds (Yavin, Dantooine, Mon Calamari, Sullust, Toprawa); the other 44 worlds are
+  neutral, leaning by canon sympathy (Alderaan, Chandrila, Kashyyyk, Ryloth toward the Rebellion;
+  Kamino, Mustafar, Muunilinst, Scarif toward the Empire). Starting worlds are scattered, not
+  contiguous, and the hidden base is usually Yavin but sometimes Dantooine or Toprawa.
 - **Hyperlanes.** A sparse, non-crossing web of lanes; fleets travel only along them on shortest paths. Arriving at a system
   with enemy warships or enemy-owned defense platforms triggers a battle.
 - **Planets** have loyalty (-100 Empire ... +100 Rebellion) that drives income, uprisings, and
