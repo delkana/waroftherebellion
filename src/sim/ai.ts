@@ -31,10 +31,20 @@ export function runAI(s: GameState, f: FactionId): void {
   const troopsAboard = myFleets.reduce((n, fl) => n + fl.troops, 0);
   const troopCap = myFleets.reduce((n, fl) => n + fleetTroopCap(fl), 0);
   const reserve = 80;
+  // when the navy is short of capital ships, everything else spends only above a savings floor for one
+  const topYard = Math.max(0, ...mine.map(p => p.shipyard));
+  const largeShort = counts.large / Math.max(1, counts.small + counts.medium + counts.large) < 0.22 && topYard >= 2;
+  // save toward the cheapest capital hull the best yard can build, but never more than three days of income
+  const largeCosts = classesFor(f).filter(c => c.size === 'large' && c.minShipyard <= topYard && !c.interdictor).map(c => c.cost);
+  const savingsTarget = largeShort && largeCosts.length ? Math.min(Math.min(...largeCosts), 3 * s.dayIncome[f]) : 0;
   for (const p of owned) {
     if (p.queue.length >= 2) continue;
     const opts = buildOptions(s, p);
-    const affordable = (it: BuildItem) => fac.credits - buildCost(it, p) >= reserve;
+    const affordable = (it: BuildItem) => {
+      // the savings floor applies only to buying other ships; troops, defenses and yards go ahead
+      const floor = reserve + (it.kind === 'ship' && shipClass(it.cls!).size !== 'large' ? savingsTarget : 0);
+      return fac.credits - buildCost(it, p) >= floor;
+    };
     let choice: BuildItem | undefined;
     const neutralsNear = (() => { const h = hopDistances(s.lanes, p.id); return s.planets.filter(q => q.owner === null && (h.get(q.id) ?? 99) <= 3).length; })();
     // the Empire raises garrison troops wherever neutral worlds are within reach, to go and take them
@@ -49,16 +59,28 @@ export function runAI(s: GameState, f: FactionId): void {
       const want: Record<string, number> = { small: 0.5 - counts.small / total, medium: 0.25 - counts.medium / total, large: 0.25 - counts.large / total };
       const neutralsLeft = s.planets.filter(q => q.owner === null).length;
       const needTransport = counts.transport < (f === 'empire' ? 3 + Math.floor(neutralsLeft / 12) : 2 + Math.floor(mine.length / 6));
+      // pick what the fleet composition needs, ignoring price; if it is out of reach, save up rather than
+      // buying the cheapest thing available (that is how a navy ends up as nothing but TIE fighters)
       let best: BuildItem | undefined, bestScore = -Infinity;
       for (const it of ships) {
         const c = shipClass(it.cls!);
         let score = c.shape === 'transport' ? (needTransport ? 0.4 : -1) : want[c.size] + rng.range(0, 0.15);
         if (c.interdictor) score = myFleetShips.filter(sh => sh.cls === c.id).length < 2 && fac.credits > 900 ? 0.35 : -5;
         if (c.size === 'large' && p.shipyard >= 2) score += 0.1;
-        if (!affordable(it)) score -= 5;
         if (score > bestScore) { bestScore = score; best = it; }
       }
-      if (best && bestScore > -1) choice = best;
+      const fleetSize = counts.small + counts.medium + counts.large;
+      // a yard whose best option is already over-supplied stays idle so the credits reach the big yards
+      if (best && bestScore > 0.03) {
+        if (affordable(best)) choice = best;
+        else if (fleetSize < 8 || myFleetShips.length < 12) {
+          // early on, keep the yards busy with the best affordable ship of a different size class
+          const cheaper = ships.filter(it => affordable(it) && shipClass(it.cls!).size !== shipClass(best!.cls!).size && shipClass(it.cls!).shape !== 'transport')
+            .sort((x, y) => shipClass(y.cls!).cost - shipClass(x.cls!).cost)[0];
+          if (cheaper) choice = cheaper;
+        }
+        // otherwise: save for it
+      }
       if (!choice && p.shipyard < 2 && fac.credits > 600 && rng.chance(0.3)) choice = opts.find(o => o.kind === 'shipyard');
     } else if (p.shipyard > 0 && p.shipyard < 3 && fac.credits > 900 && rng.chance(0.4)) choice = opts.find(o => o.kind === 'shipyard');
     else if (p.defense < 1 && p.shipyard >= 2 && fac.credits > 600 && rng.chance(0.3)) choice = opts.find(o => o.kind === 'defense');
