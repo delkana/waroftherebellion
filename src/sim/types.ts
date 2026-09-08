@@ -115,6 +115,10 @@ export interface GameState {
   winner: FactionId | null;
   aiTimer: number;
   dayIncome: Record<FactionId, number>;
+  /** Observer mode: both sides are AI, the map is fully visible, the viewer gives no orders. */
+  observer?: boolean;
+  /** Observer mode: resolve battles automatically instead of prompting. */
+  autoBattles?: boolean;
 }
 
 export const HOURS_PER_DAY = 24;

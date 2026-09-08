@@ -78,7 +78,7 @@ const galaxyCallbacks = {
   onRightClickPlanet(id: number) {
     if (!state) return;
     const f = selectedFleet();
-    if (f && f.faction === state.player) {
+    if (f && f.faction === state.player && !state.observer) {
       if (orderMove(state, f, id)) log(state, `${f.name} ordered to ${state.planets[id].name}`, 'info', state.player, id);
     } else galaxy?.focusPlanet(id);
   },
@@ -89,7 +89,7 @@ const galaxyCallbacks = {
 function startTacticalBattle(): void {
   if (!state || !state.pendingBattle || !galaxy) return;
   const setup = gatherBattle(state, state.pendingBattle);
-  const sim = new BattleSim(setup, state.player);
+  const sim = new BattleSim(setup, state.player, !!state.observer);
   const view = new BattleView(renderer, overlay, sim, state.planets[setup.planet].type);
   const speeds = [0, 0.5, 1, 2];
   view.onSpeedKey = code => {
@@ -138,6 +138,7 @@ const hud = new Hud(document.getElementById('hud')!, {
   },
   cancelBuild(planetId, idx) { if (state) cancelBuild(state, state.planets[planetId], idx); },
   startMission(charId, type) {
+    if (state?.observer) return;
     if (target && target.charId === charId && target.type === type) setTarget(null);
     else setTarget({ kind: 'mission', charId, type });
   },
@@ -158,6 +159,8 @@ const hud = new Hud(document.getElementById('hud')!, {
   },
   stopFleet(fleetId) { if (state) { const f = state.fleets.find(x => x.id === fleetId); if (f) orderStop(state, f); } },
   fightBattle: startTacticalBattle,
+  watchBattle: startTacticalBattle,
+  toggleAutoBattles() { if (state) state.autoBattles = !state.autoBattles; },
   autoResolve() {
     if (!state || !state.pendingBattle) return;
     const setup = gatherBattle(state, state.pendingBattle);
@@ -167,9 +170,11 @@ const hud = new Hud(document.getElementById('hud')!, {
     setSelection({ kind: 'planet', id: setup.planet });
     if (!state.pendingBattle) setSpeed(lastSpeed);
   },
-  newGame(faction: FactionId, seed: number) {
-    state = generateGalaxy({ seed, player: faction });
-    log(state, faction === 'empire' ? 'The Rebel base hides somewhere in the Outer Rim. Find it and crush it.' : 'The Empire does not know where our base is. Keep it that way.', 'info', faction);
+  newGame(faction: FactionId | 'observer', seed: number) {
+    const observer = faction === 'observer';
+    state = generateGalaxy({ seed, player: observer ? 'empire' : faction, observer });
+    if (observer) log(state, 'Observer mode: both sides are commanded by the AI.', 'info');
+    else log(state, faction === 'empire' ? 'The Rebel base hides somewhere in the Outer Rim. Find it and crush it.' : 'The Empire does not know where our base is. Keep it that way.', 'info', faction);
     beginGalaxy();
   },
   loadGame() {
@@ -247,6 +252,11 @@ function tick(dt: number): void {
   if (cw > 0 && chh > 0 && (cw !== overlay.width || chh !== overlay.height)) resize();
   if (mode === 'galaxy' && state && galaxy) {
     if (!state.pendingBattle && !state.winner) step(state, dt * state.speed * HOURS_PER_REAL_SECOND);
+    if (state.pendingBattle && state.observer && state.autoBattles) {
+      const setup = gatherBattle(state, state.pendingBattle);
+      applyBattleResult(state, setup, autoResolve(setup));
+      if (!state.pendingBattle) state.speed = lastSpeed;
+    }
     if (state.pendingBattle && !promptShown) { promptShown = true; state.speed = 0; hud.showBattlePrompt(state, gatherBattle(state, state.pendingBattle)); }
     if (state.winner && !gameOverShown) { gameOverShown = true; state.speed = 0; hud.showGameOver(state); }
     // route preview while a fleet is selected and hovering a planet

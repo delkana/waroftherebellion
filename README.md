@@ -45,6 +45,7 @@ npm run build      # typecheck + production bundle in dist/
   hyperspace jumps. Retreating fleets jump out after 12 seconds.
 - **AI** opponent builds a balanced fleet, hunts your base, launches invasions, and runs its own
   leaders' missions.
+- **Observer mode** from the main menu: both sides are played by the AI with the whole galaxy revealed. Battles auto-resolve by default; switch the top-bar toggle to "watch" to be offered a front-row seat at each one.
 - **Save / Load** via the top bar (localStorage).
 
 ## Controls

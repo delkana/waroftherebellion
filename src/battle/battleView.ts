@@ -209,7 +209,7 @@ export class BattleView {
         }
         this.setSelection(inBox, e.shiftKey);
       } else {
-        const u = this.pickUnit(x, y, u => u.side === this.sim.playerSide);
+        const u = this.pickUnit(x, y, u => this.sim.observer || u.side === this.sim.playerSide);
         const now = performance.now();
         const dbl = now - this.lastClick < 350;
         this.lastClick = now;
@@ -222,7 +222,7 @@ export class BattleView {
           } else this.setSelection([u]);
         } else if (!e.shiftKey) this.setSelection([]);
       }
-    } else if (d.button === 2 && this.selected.size) {
+    } else if (d.button === 2 && this.selected.size && !this.sim.observer) {
       const units = [...this.selected].filter(u => u.alive);
       if (d.attackTarget) this.sim.cmdAttack(units, d.attackTarget);
       else if (d.base) this.sim.cmdMove(units, d.base.clone().add(new THREE.Vector3(0, d.height, 0)), this.formation);
@@ -239,13 +239,13 @@ export class BattleView {
     if (mine) {
       if (dbl) this.setSelection(this.sim.alive(this.sim.playerSide).filter(o => o.cls.id === mine.cls.id), true);
       else this.setSelection([mine]);
-    } else if (enemy && this.selected.size) {
+    } else if (enemy && this.selected.size && !this.sim.observer) {
       this.sim.cmdAttack([...this.selected].filter(u => u.alive), enemy);
     } else this.setSelection([]);
   }
   /** Touch: hold on space to move the selection there (on its current plane), hold an enemy to attack. */
   private longPress(x: number, y: number): boolean {
-    if (!this.selected.size) return false;
+    if (!this.selected.size || this.sim.observer) return false;
     const units = [...this.selected].filter(u => u.alive);
     const enemy = this.pickUnit(x, y, u => u.side !== this.sim.playerSide);
     if (enemy) { this.sim.cmdAttack(units, enemy); return true; }
@@ -263,7 +263,7 @@ export class BattleView {
       if (e.code === 'KeyF') this.focusSelection();
       if (e.code === 'Escape') this.setSelection([]);
       if (e.code === 'KeyA' && e.ctrlKey) { e.preventDefault(); this.setSelection(this.sim.alive(this.sim.playerSide)); }
-      if (e.code === 'KeyS' && this.selected.size && !e.ctrlKey && e.shiftKey) this.sim.cmdStop([...this.selected]);
+      if (e.code === 'KeyS' && this.selected.size && !e.ctrlKey && e.shiftKey && !this.sim.observer) this.sim.cmdStop([...this.selected]);
       if (e.code === 'KeyM') this.toggleMute();
       if (e.code === 'KeyZ') this.setFormation('wall');
       if (e.code === 'KeyX') this.setFormation('wedge');

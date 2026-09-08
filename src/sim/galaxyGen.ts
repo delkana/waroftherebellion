@@ -3,7 +3,7 @@ import type { Character, FactionId, Fleet, GameState, Lane, Planet, Ship } from 
 import { findPath, hopDistances, pathLength } from './pathfinding';
 import { CANON_WORLDS } from './canonWorlds';
 
-export interface GenOptions { seed: number; player: FactionId }
+export interface GenOptions { seed: number; player: FactionId; observer?: boolean }
 
 const MAP_RADIUS = 118;   // game units from the map centre to the farthest world
 const MIN_SPACING = 11;    // worlds that share a grid square get nudged apart to at least this
@@ -84,11 +84,12 @@ export function generateGalaxy(opts: GenOptions): GameState {
     seed: opts.seed, hours: 0, speed: 0, player: opts.player,
     planets, lanes, fleets: [], characters: [],
     factions: {
-      empire: { id: 'empire', name: 'Galactic Empire', credits: 1000, hq: empireHq, knowsEnemyHq: false, isAI: opts.player !== 'empire' },
-      rebellion: { id: 'rebellion', name: 'Rebel Alliance', credits: 800, hq: rebelHq, knowsEnemyHq: true, isAI: opts.player !== 'rebellion' },
+      empire: { id: 'empire', name: 'Galactic Empire', credits: 1000, hq: empireHq, knowsEnemyHq: false, isAI: !!opts.observer || opts.player !== 'empire' },
+      rebellion: { id: 'rebellion', name: 'Rebel Alliance', credits: 800, hq: rebelHq, knowsEnemyHq: true, isAI: !!opts.observer || opts.player !== 'rebellion' },
     },
     log: [], nextId: 1000, pendingBattle: null, winner: null, aiTimer: 0,
     dayIncome: { empire: 0, rebellion: 0 },
+    observer: !!opts.observer, autoBattles: !!opts.observer,
   };
 
   // ---- starting fleets ----

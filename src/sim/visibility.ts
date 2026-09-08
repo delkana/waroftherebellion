@@ -3,6 +3,7 @@ import type { FactionId, Fleet, GameState, Planet } from './types';
 
 /** Does `viewer` have a physical presence at the planet? */
 export function hasPresence(s: GameState, viewer: FactionId, planetId: number): boolean {
+  if (s.observer) return true;
   const p = s.planets[planetId];
   if (p.owner === viewer) return true;
   if (s.fleets.some(f => f.faction === viewer && f.at === planetId)) return true;
@@ -23,6 +24,7 @@ export function canSeeDetails(s: GameState, viewer: FactionId, p: Planet): boole
 }
 
 export function canSeeFleet(s: GameState, viewer: FactionId, f: Fleet): boolean {
+  if (s.observer) return true;
   if (f.faction === viewer) return true;
   if (f.at !== null) return inSensorRange(s, viewer, f.at);
   if (f.travel) return hasPresence(s, viewer, f.travel.from) || hasPresence(s, viewer, f.travel.to)
@@ -31,6 +33,7 @@ export function canSeeFleet(s: GameState, viewer: FactionId, f: Fleet): boolean 
 }
 
 export function knowsHq(s: GameState, viewer: FactionId, planetId: number): boolean {
+  if (s.observer) return s.factions.empire.hq === planetId || s.factions.rebellion.hq === planetId;
   if (s.factions.empire.hq === planetId) return true; // the Imperial capital is public knowledge
   if (s.factions.rebellion.hq === planetId) return viewer === 'rebellion' || s.factions.empire.knowsEnemyHq;
   return false;

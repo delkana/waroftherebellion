@@ -26,7 +26,9 @@ export interface HudActions {
   stopFleet(fleetId: number): void;
   fightBattle(): void;
   autoResolve(): void;
-  newGame(faction: FactionId, seed: number): void;
+  newGame(faction: FactionId | 'observer', seed: number): void;
+  toggleAutoBattles(): void;
+  watchBattle(): void;
   loadGame(): boolean;
   saveGame(): void;
   toMenu(): void;
@@ -50,7 +52,7 @@ export class Hud {
   private lastTop = '';
   private lastBattleSel = '';
   private lastBattleForces = '';
-  private menuFaction: FactionId = 'rebellion';
+  private menuFaction: FactionId | 'observer' = 'rebellion';
 
   constructor(root: HTMLElement, private a: HudActions) {
     this.root = root;
@@ -93,7 +95,9 @@ export class Hud {
       case 'stop': this.a.stopFleet(num('fleet')); break;
       case 'fight': this.a.fightBattle(); break;
       case 'auto': this.a.autoResolve(); break;
-      case 'menuFaction': this.menuFaction = d.faction as FactionId; this.renderMenu(); break;
+      case 'menuFaction': this.menuFaction = d.faction as FactionId | 'observer'; this.renderMenu(); break;
+      case 'autoBattles': this.a.toggleAutoBattles(); break;
+      case 'watch': this.a.watchBattle(); break;
       case 'newGame': { const seedEl = this.root.querySelector('#seed') as HTMLInputElement; const seed = Number(seedEl?.value) || Math.floor(Math.random() * 1e6); this.a.newGame(this.menuFaction, seed); break; }
       case 'load': if (!this.a.loadGame()) alert('No saved game found'); break;
       case 'save': this.a.saveGame(); break;
@@ -136,6 +140,10 @@ export class Hud {
             <p>A hidden base and a few loyal worlds. Win hearts with diplomacy, raid Imperial shipping, and take Coruscant itself.</p>
           </div>
         </div>
+        <div class="side observer ${this.menuFaction === 'observer' ? 'selected' : ''}" data-action="menuFaction" data-faction="observer" style="margin-bottom:12px">
+          <h3 style="color:var(--accent)">Observer</h3>
+          <p>Watch the two AIs fight it out with the whole galaxy revealed. Battles auto-resolve unless you choose to watch them.</p>
+        </div>
         <div><label>Galaxy seed</label><input id="seed" value="${Math.floor(Math.random() * 100000)}" /></div>
         <button class="primary start" data-action="newGame">Begin the war</button>
         ${hasSave ? '<button class="start" data-action="load">Continue saved game</button>' : ''}
@@ -152,12 +160,20 @@ export class Hud {
   update(s: GameState, sel: GalaxySelection | null, target: TargetMode): void {
     const me = s.player;
     const f = s.factions[me];
-    const top = `
+    const obs = !!s.observer;
+    const worlds = (x: FactionId) => s.planets.filter(p => p.owner === x).length;
+    const head = obs ? `
+      <span class="faction" style="color:var(--accent)">Observer</span>
+      <span class="stat"><span class="empire" style="color:var(--empire)">Empire</span> <b>${worlds('empire')}</b> worlds · <b>${Math.floor(s.factions.empire.credits)}</b> cr</span>
+      <span class="stat"><span style="color:var(--rebellion)">Rebellion</span> <b>${worlds('rebellion')}</b> worlds · <b>${Math.floor(s.factions.rebellion.credits)}</b> cr</span>
+      <button class="small ${s.autoBattles ? 'active' : ''}" data-action="autoBattles" title="Auto-resolve battles, or pause and offer to watch them">Battles: ${s.autoBattles ? 'auto' : 'watch'}</button>
+      <span class="spacer"></span>` : `
       <span class="faction ${me}">${factionName(me)}</span>
       <span class="stat">Credits <b>${Math.floor(f.credits)}</b></span>
       <span class="stat">Income <b>${s.dayIncome[me].toFixed(0)}</b>/day</span>
-      <span class="stat">Worlds <b>${s.planets.filter(p => p.owner === me).length}</b> / ${s.planets.length}</span>
-      <span class="spacer"></span>
+      <span class="stat">Worlds <b>${worlds(me)}</b> / ${s.planets.length}</span>
+      <span class="spacer"></span>`;
+    const top = head + `
       <span class="speed">
         <button data-action="speed" data-speed="0" class="${s.speed === 0 ? 'active' : ''}">❚❚</button>
         <button data-action="speed" data-speed="1" class="${s.speed === 1 ? 'active' : ''}">1×</button>
@@ -172,7 +188,7 @@ export class Hud {
 
     // objectives
     const rebHq = s.planets[s.factions.rebellion.hq];
-    const obj = me === 'empire'
+    const obj = obs ? `<b>Observer.</b> Rebel HQ: <b>${esc(rebHq.name)}</b>${s.factions.empire.knowsEnemyHq ? ' (the Empire knows)' : ' (hidden from the Empire)'}. Select anything to inspect it.` : me === 'empire'
       ? `<b>Objective:</b> locate and capture the hidden Rebel headquarters. ${s.factions.empire.knowsEnemyHq ? `Intelligence places it on <b>${rebHq.name}</b>.` : 'Use espionage on Rebel worlds to find it.'}<br><b>Defend</b> ${esc(s.planets[s.factions.empire.hq].name)} at all costs.`
       : `<b>Objective:</b> capture <b>${esc(s.planets[s.factions.empire.hq].name)}</b>, the Imperial capital.<br><b>Protect</b> the Alliance headquarters on <b>${rebHq.name}</b> — the Empire ${s.factions.empire.knowsEnemyHq ? '<span class="bad">knows its location!</span>' : 'has not found it yet.'}`;
     const objEl = this.el('objectives');
@@ -182,16 +198,27 @@ export class Hud {
     let side = '';
     if (sel?.kind === 'planet') side = this.renderPlanet(s, s.planets[sel.id], target);
     else if (sel?.kind === 'fleet') { const fl = s.fleets.find(x => x.id === sel.id); side = fl ? this.renderFleet(s, fl) : ''; }
-    else side = this.renderOverview(s);
+    else side = obs ? this.renderObserver(s) : this.renderOverview(s);
     if (side !== this.lastSide) { this.el('side').innerHTML = side; this.lastSide = side; }
 
     // log
-    const entries = s.log.filter(e => e.faction === 'all' || e.faction === me).slice(-9);
+    const entries = s.log.filter(e => obs || e.faction === 'all' || e.faction === me).slice(-9);
     const logHtml = entries.map(e => `<div class="entry ${e.kind}" ${e.planet !== undefined ? `data-action="focusPlanet" data-id="${e.planet}"` : ''}><span class="t">${fmtTime(e.time).replace('  ', ' ')}</span>${esc(e.text)}</div>`).join('');
     if (logHtml !== this.lastLog) { this.el('log').innerHTML = logHtml; this.lastLog = logHtml; }
 
     const help = `<kbd>LMB</kbd> select · <kbd>RMB</kbd> send fleet / drag to orbit · <kbd>MMB</kbd> pan · <kbd>Wheel</kbd> zoom · <kbd>WASD</kbd> <kbd>QE</kbd> camera · <kbd>F</kbd> focus · <kbd>Space</kbd> pause · <kbd>1-4</kbd> speed · touch: drag pan · pinch zoom · two-finger drag orbit · hold planet to send fleet`;
     if (this.el('help').innerHTML !== help) this.el('help').innerHTML = help;
+  }
+
+  private renderObserver(s: GameState): string {
+    const side = (f: FactionId) => {
+      const fleets = s.fleets.filter(x => x.faction === f);
+      const chars = s.characters.filter(c => c.faction === f);
+      return `<h3 class="${f}">${factionName(f)} — ${s.planets.filter(p => p.owner === f).length} worlds, ${fleets.reduce((n, x) => n + x.ships.length, 0)} ships</h3>
+      ${fleets.map(x => `<div class="row clickable" data-action="selectFleet" data-id="${x.id}"><span>${esc(x.name)}</span><span class="sub">${x.ships.length} ships · ${x.at !== null ? esc(s.planets[x.at].name) : '→ ' + esc(s.planets[x.travel!.to].name)}</span></div>`).join('')}
+      ${chars.map(c => this.charRow(s, c, null, false)).join('')}`;
+    };
+    return `<h2>Galactic Overview</h2><div class="sub">Both sides are played by the AI. Click a world or fleet to inspect it.</div>${side('empire')}${side('rebellion')}`;
   }
 
   private renderOverview(s: GameState): string {
@@ -225,7 +252,7 @@ export class Hud {
   private renderPlanet(s: GameState, p: Planet, target: TargetMode): string {
     const me = s.player;
     const details = canSeeDetails(s, me, p);
-    const mine = p.owner === me;
+    const mine = p.owner === me && !s.observer;
     const align = alignment(p, me);
     const hq = knowsHq(s, me, p.id);
     let html = `<h2>${esc(p.name)} ${hq ? `<span class="sub">— ${p.id === s.factions.empire.hq ? 'Imperial capital' : 'Rebel headquarters'}</span>` : ''}</h2>
@@ -243,6 +270,7 @@ export class Hud {
     if (p.invasion) html += `<div class="row"><span class="${p.invasion.attacker === me ? 'good' : 'bad'}">${factionName(p.invasion.attacker)} invasion: ${p.invasion.troops} regiments</span><span class="sub">${hrs(p.invasion.hoursLeft)}</span></div>`;
     if (p.unrest > 24 && details) html += `<div class="row bad">Unrest is building (${Math.floor(p.unrest / 24)} days)</div>`;
 
+    if (s.observer && p.owner && p.queue.length) html += `<h3>Construction</h3>` + p.queue.map(q => `<div class="row"><span>${esc(q.label)}</span><span class="sub">${hrs(q.total - q.progress)}</span></div>`).join('');
     // build
     if (mine) {
       html += `<h3>Construction</h3><div class="queue">`;
@@ -268,15 +296,15 @@ export class Hud {
     const chars = charactersAt(s, p.id).filter(c => c.faction === me || details);
     const captured = s.characters.filter(c => c.captured && c.at === p.id && (c.faction === me || details));
     if (chars.length || captured.length) {
-      html += `<h3>Leaders present</h3>` + chars.map(c => this.charRow(s, c, target, c.faction === me)).join('') + captured.map(c => this.charRow(s, c, null, false)).join('');
+      html += `<h3>Leaders present</h3>` + chars.map(c => this.charRow(s, c, target, c.faction === me && !s.observer)).join('') + captured.map(c => this.charRow(s, c, null, false)).join('');
     }
-    if (!mine) html += `<div class="hint">${p.owner ? 'Select a fleet and right-click here to attack or blockade. Land troops from orbit to invade.' : 'Neutral worlds join a side at high loyalty, or can be taken by force.'}</div>`;
+    if (!mine && !s.observer) html += `<div class="hint">${p.owner ? 'Select a fleet and right-click here to attack or blockade. Land troops from orbit to invade.' : 'Neutral worlds join a side at high loyalty, or can be taken by force.'}</div>`;
     return html;
   }
 
   private renderFleet(s: GameState, f: Fleet): string {
     const me = s.player;
-    const mine = f.faction === me;
+    const mine = f.faction === me && !s.observer;
     const groups = new Map<string, { n: number; hull: number }>();
     for (const sh of f.ships) { const g = groups.get(sh.cls) ?? { n: 0, hull: 0 }; g.n++; g.hull += sh.hull; groups.set(sh.cls, g); }
     let where = '';
@@ -327,12 +355,12 @@ export class Hud {
       <p>${factionName(setup.attacker)} forces have entered orbit${p.owner ? ` of a ${factionName(p.owner)} world` : ''}.</p>
       <div class="forces"><div><h4 class="${setup.attacker}">${factionName(setup.attacker)} (attacking)</h4><div>${side(setup.attacker)}</div></div>
       <div><h4 class="${setup.defender}">${factionName(setup.defender)} (defending)</h4><div>${side(setup.defender)}</div></div></div>
-      <div class="buttons"><button data-action="auto">Auto-resolve</button><button class="primary" data-action="fight">Take command</button></div></div>`;
+      <div class="buttons"><button data-action="auto">Auto-resolve</button>${s.observer ? '<button class="primary" data-action="watch">Watch battle</button>' : '<button class="primary" data-action="fight">Take command</button>'}</div></div>`;
     this.el('modal').classList.add('show');
   }
   showGameOver(s: GameState): void {
     const won = s.winner === s.player;
-    this.el('modal').innerHTML = `<div class="box panel"><h2>${won ? 'Victory' : 'Defeat'}</h2>
+    this.el('modal').innerHTML = `<div class="box panel"><h2>${s.observer ? `${factionName(s.winner!)} wins` : won ? 'Victory' : 'Defeat'}</h2>
       <p>${esc(s.log[s.log.length - 1]?.text ?? '')}</p>
       <p>${fmtTime(s.hours)}</p>
       <div class="buttons"><button data-action="closeModal">Keep watching</button><button class="primary" data-action="menu">Main menu</button></div></div>`;
@@ -353,7 +381,7 @@ export class Hud {
       </span>
       <span class="stat" style="color:#8a98a8">${sim.time.toFixed(0)}s</span>
       <button class="small" data-action="bmute" title="Toggle sound (M)">${muted ? 'Sound off' : 'Sound on'}</button>
-      <button class="danger" data-action="retreat" ${sim.retreating[me] || sim.over ? 'disabled' : ''}>Retreat</button>`;
+      ${sim.observer ? '' : `<button class="danger" data-action="retreat" ${sim.retreating[me] || sim.over ? 'disabled' : ''}>Retreat</button>`}`;
     const btop = this.el('btop');
     if (btop.innerHTML !== top) btop.innerHTML = top;
 
@@ -383,7 +411,7 @@ export class Hud {
   showBattleResult(sim: BattleSim, planetName: string): void {
     const r = sim.result!;
     const me = sim.playerSide;
-    const title = r.winner === me ? 'Victory' : r.winner ? 'Defeat' : 'Stalemate';
+    const title = sim.observer ? (r.winner ? `${factionName(r.winner)} victory` : 'Stalemate') : r.winner === me ? 'Victory' : r.winner ? 'Defeat' : 'Stalemate';
     const lost = (f: FactionId) => sim.units.filter(u => u.side === f && !u.alive).length;
     this.el('bresult').innerHTML = `<h2>${title} at ${esc(planetName)}</h2>
       <p>${r.retreated ? `${factionName(r.retreated)} forces withdrew to hyperspace.` : `${factionName(r.winner!)} forces hold the orbit.`}<br>

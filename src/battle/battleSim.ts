@@ -72,7 +72,7 @@ export class BattleSim {
   private startStrength: Record<FactionId, number> = { empire: 0, rebellion: 0 };
   planetPos = new THREE.Vector3(0, -110, 540);
 
-  constructor(public setup: BattleSetup, public playerSide: FactionId) {
+  constructor(public setup: BattleSetup, public playerSide: FactionId, public observer = false) {
     const rnd = () => Math.random();
     for (const side of ['empire', 'rebellion'] as FactionId[]) {
       const specs = setup.units.filter(u => u.faction === side);
@@ -204,7 +204,7 @@ export class BattleSim {
     this.time += dt;
     this.slowMo = Math.max(0, this.slowMo - dt);
     this.aiTimer -= dt;
-    if (this.aiTimer <= 0) { this.aiTimer = 1.2; this.think(enemyOf(this.playerSide)); this.autoEngage(); }
+    if (this.aiTimer <= 0) { this.aiTimer = 1.2; this.think(enemyOf(this.playerSide)); if (this.observer) this.think(this.playerSide); this.autoEngage(); }
     for (const sq of this.squads) this.promoteLeader(sq);
     for (const u of this.units) if (u.alive && !u.escaped) this.stepUnit(u, dt);
     this.stepProjectiles(dt);
