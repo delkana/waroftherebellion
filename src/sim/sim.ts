@@ -3,6 +3,7 @@ import { classesFor, classStrength, COURIER_SPEED, DEFENSE_COST, DEFENSE_HOURS, 
 import { enemyOf, FACTIONS, HOURS_PER_DAY, type BuildItem, type Character, type FactionId, type Fleet, type GameState, type LogEntry, type MissionType, type Planet } from './types';
 import { findPath, laneBetween, pathLength } from './pathfinding';
 import { runAI } from './ai';
+import { canSeeDetails } from './visibility';
 
 export const rng = new Rng(12345);
 
@@ -155,15 +156,18 @@ export function transferTroops(s: GameState, fleet: Fleet, amount: number): bool
   return true;
 }
 
-export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36, recruit: 48, rescue: 24 };
-export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising', recruit: 'Recruit', rescue: 'Rescue' };
+export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36, recruit: 48, rescue: 24, abduct: 24 };
+/** Missions several leaders can run together against one target; each extra member raises the odds. */
+export const TEAM_MISSIONS: MissionType[] = ['rescue', 'abduct'];
+export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising', recruit: 'Recruit', rescue: 'Rescue', abduct: 'Abduct' };
 export const MISSION_DESC: Record<MissionType, string> = {
   diplomacy: 'Raise the planet\'s loyalty to your cause. Neutral planets join you at high loyalty.',
   espionage: 'Reveal enemy fleets, garrisons and production. The Empire may locate the hidden Rebel base.',
   sabotage: 'Destroy construction progress, defense platforms or shipyards; damage ships in orbit.',
   incite: 'Stir unrest on an enemy world. Low-garrison planets with hostile populations revolt.',
   recruit: 'Find a new leader on one of your worlds or a sympathetic neutral. The Rebellion finds them more easily.',
-  rescue: 'Break a captured leader out of an enemy world. Risky; sabotage and espionage help.',
+  rescue: 'Break a captured leader out of an enemy world. Risky; sabotage and espionage help. Send several leaders at the same world to raise the odds.',
+  abduct: 'Seize an enemy leader known to be on a world and bring them to one of your worlds. Send several leaders at the same world to raise the odds.',
 };
 
 /** Why a mission cannot target a planet, or null if it can. */
@@ -177,6 +181,11 @@ export function missionProblem(s: GameState, ch: Character, type: MissionType, t
     case 'rescue':
       if (!s.characters.some(c => c.faction === ch.faction && c.captured && !c.dead && c.at === target)) return 'No captured leader is held there';
       return null;
+    case 'abduct': {
+      if (!canSeeDetails(s, ch.faction, p)) return 'You have no intelligence on who is there';
+      if (!charactersAt(s, target, enemyOf(ch.faction)).length) return 'No enemy leader is known to be there';
+      return null;
+    }
     case 'incite': case 'sabotage':
       if (p.owner === ch.faction) return 'That is your own world';
       return null;
@@ -201,6 +210,33 @@ const IMPERIAL_RECRUITS: [string, string, number, number, number, number][] = [
   ['Kallus', 'Agent', 1, 5, 3, 2], ['Pryce', 'Governor', 3, 3, 1, 2], ['Yularen', 'Colonel', 2, 5, 2, 3],
   ['Mara Jade', 'Emperor\'s Hand', 2, 5, 5, 2], ['Boba Fett', 'Bounty Hunter', 1, 4, 5, 2], ['Zsinj', 'Warlord', 1, 2, 2, 4],
 ];
+
+/** Members of a team mission currently working the same target. */
+export function missionTeam(s: GameState, c: Character): Character[] {
+  const m = c.mission;
+  if (!m || !TEAM_MISSIONS.includes(m.type)) return [c];
+  return s.characters.filter(x => x.faction === c.faction && !x.captured && !x.dead && x.mission && x.mission.type === m.type && x.mission.target === m.target && x.mission.phase === 'work');
+}
+
+/** Success odds of a mission (0..1), for the UI and for resolution. `team` are the leaders working it together. */
+export function missionChance(s: GameState, team: Character[], type: MissionType, target: number): number {
+  const p = s.planets[target];
+  const lead = team[0];
+  const enemy = enemyOf(lead.faction);
+  const hostile = p.owner === enemy;
+  const skillOf = (c: Character) => type === 'diplomacy' || type === 'incite' || type === 'recruit' ? c.diplomacy : type === 'espionage' ? c.espionage : type === 'rescue' || type === 'abduct' ? Math.max(c.sabotage, c.espionage) : c.sabotage;
+  const skill = Math.max(...team.map(skillOf));
+  let chance = 0.3 + skill * 0.11;
+  if (hostile) chance -= p.garrison * 0.04;
+  chance -= charactersAt(s, p.id, enemy).length * 0.1;
+  const gov = governorOf(s, p.id);
+  if (gov && gov.faction === enemy) chance -= 0.06 * gov.espionage;
+  if (type === 'recruit') chance = 0.2 + skill * 0.08 + (lead.faction === 'rebellion' ? 0.15 : 0) + Math.max(0, alignment(p, lead.faction)) / 250;
+  if (type === 'rescue') chance = 0.15 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
+  if (type === 'abduct') chance = 0.12 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - charactersAt(s, p.id, enemy).length * 0.05 - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
+  if (TEAM_MISSIONS.includes(type)) chance += Math.min(0.3, 0.1 * (team.length - 1));
+  return Math.max(0.05, Math.min(0.95, chance));
+}
 
 // ---------------------------------------------------------------- assignments
 export function assignGovernor(s: GameState, ch: Character): boolean {
@@ -464,18 +500,16 @@ function resolveMission(s: GameState, c: Character): void {
   const p = s.planets[m.target];
   const enemy = enemyOf(c.faction);
   const hostile = p.owner === enemy;
-  const skill = m.type === 'diplomacy' || m.type === 'incite' || m.type === 'recruit' ? c.diplomacy : m.type === 'espionage' ? c.espionage : m.type === 'rescue' ? Math.max(c.sabotage, c.espionage) : c.sabotage;
-  let chance = 0.3 + skill * 0.11;
-  if (hostile) chance -= p.garrison * 0.04;
-  chance -= charactersAt(s, p.id, enemy).length * 0.1;
-  const gov = governorOf(s, p.id);
-  if (gov && gov.faction === enemy) chance -= 0.06 * gov.espionage;
-  if (m.type === 'recruit') chance = 0.2 + skill * 0.08 + (c.faction === 'rebellion' ? 0.15 : 0) + Math.max(0, alignment(p, c.faction)) / 250;
-  if (m.type === 'rescue') chance = 0.15 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
-  chance = Math.max(0.1, Math.min(0.95, chance));
+  const skill = m.type === 'diplomacy' || m.type === 'incite' || m.type === 'recruit' ? c.diplomacy : m.type === 'espionage' ? c.espionage : m.type === 'rescue' || m.type === 'abduct' ? Math.max(c.sabotage, c.espionage) : c.sabotage;
+  // team missions resolve together: everyone on site shares the roll and the consequences
+  c.mission = m;
+  const team = missionTeam(s, c);
+  c.mission = null;
+  const chance = missionChance(s, team, m.type, m.target);
   const success = rng.chance(chance);
-  const who = `${c.title} ${c.name}`;
+  const who = team.length > 1 ? team.map(x => `${x.title} ${x.name}`).join(' and ') : `${c.title} ${c.name}`;
   const mine = c.faction === s.player;
+  for (const x of team) x.mission = null;
   if (success) {
     switch (m.type) {
       case 'diplomacy': {
@@ -518,8 +552,20 @@ function resolveMission(s: GameState, c: Character): void {
           captive.captured = false; captive.captivity = 0;
           log(s, `${who} rescued ${captive.title} ${captive.name} from ${p.name}!`, mine ? 'good' : 'bad', 'all', p.id);
           evacuate(s, captive);
-          evacuate(s, c);
+          for (const x of team) evacuate(s, x);
         }
+        break;
+      }
+      case 'abduct': {
+        const targets = charactersAt(s, p.id, enemy);
+        const victim = targets.length ? rng.pick(targets) : null;
+        if (victim) {
+          captureCharacter(s, victim, p.id);
+          const home = nearestOwned(s, c.faction, p.id);
+          if (home !== null) victim.at = home;
+          log(s, `${who} abducted ${victim.title} ${victim.name} from ${p.name}!`, mine ? 'good' : 'bad', 'all', p.id);
+          for (const x of team) evacuate(s, x);
+        } else log(s, `${who}: no enemy leader was found on ${p.name}`, 'info', c.faction, p.id);
         break;
       }
       case 'incite': {
@@ -531,11 +577,16 @@ function resolveMission(s: GameState, c: Character): void {
       }
     }
   } else {
-    const captureChance = hostile ? (m.type === 'diplomacy' ? 0.1 : m.type === 'rescue' ? 0.4 : 0.3) : (m.type === 'recruit' ? 0 : 0.03);
-    if (rng.chance(captureChance)) {
-      c.captured = true; c.captivity = 0; c.assignment = null;
-      log(s, `${who} was captured on ${p.name}!`, mine ? 'bad' : 'good', 'all', p.id);
-    } else {
+    const captureChance = hostile ? (m.type === 'diplomacy' ? 0.1 : m.type === 'rescue' || m.type === 'abduct' ? 0.35 : 0.3) : (m.type === 'recruit' ? 0 : m.type === 'abduct' ? 0.15 : 0.03);
+    let anyCaptured = false;
+    for (const x of team) {
+      if (rng.chance(captureChance)) {
+        anyCaptured = true;
+        captureCharacter(s, x, p.id);
+        log(s, `${x.title} ${x.name} was captured on ${p.name}!`, mine ? 'bad' : 'good', 'all', p.id);
+      }
+    }
+    if (!anyCaptured) {
       if (m.type === 'diplomacy') shiftLoyalty(p, c.faction, 3);
       log(s, `${who}: ${MISSION_LABEL[m.type].toLowerCase()} on ${p.name} failed`, mine ? 'bad' : 'info', c.faction, p.id);
     }
@@ -571,6 +622,15 @@ function tickCaptivity(s: GameState, c: Character, dt: number): void {
       log(s, `${c.title} ${c.name} talked: ${factionName(captor)} intelligence now covers ${factionName(c.faction)} worlds for three days`, captor === s.player ? 'good' : 'bad', 'all', p.id);
     }
   }
+}
+
+export function nearestOwned(s: GameState, f: FactionId, from: number): number | null {
+  let best: number | null = null, bestLen = Infinity;
+  for (const p of ownedPlanets(s, f)) {
+    const path = findPath(s.lanes, from, p.id);
+    if (path) { const l = pathLength(s.lanes, path); if (l < bestLen) { bestLen = l; best = p.id; } }
+  }
+  return best;
 }
 
 export function captureCharacter(s: GameState, c: Character, planetId: number): void {

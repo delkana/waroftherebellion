@@ -1,5 +1,5 @@
 import type { BattleSetup, BattleResult } from '../sim/combat';
-import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives } from '../sim/sim';
+import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives, missionChance, TEAM_MISSIONS } from '../sim/sim';
 import { shipClass } from '../sim/ships';
 import { fmtTime, type Character, type FactionId, type Fleet, type GameState, type MissionType, type Planet } from '../sim/types';
 import { canSeeDetails, canSeeFleet, knowsHq } from '../sim/visibility';
@@ -249,7 +249,13 @@ export class Hud {
     let status = '';
     if (c.dead) status = `<span class="bad">killed in action</span>`;
     else if (c.captured) status = `<span class="bad">captured on ${esc(s.planets[c.at].name)} (${Math.floor((c.captivity ?? 0) / 24)}d)</span>`;
-    else if (c.mission) status = `<span class="sub">${MISSION_LABEL[c.mission.type]} ${c.mission.phase === 'travel' ? 'en route to' : 'on'} ${esc(s.planets[c.mission.target].name)} (${hrs(c.mission.hoursLeft)})</span>`;
+    else if (c.mission) {
+      const m = c.mission;
+      const team = TEAM_MISSIONS.includes(m.type) ? s.characters.filter(x => x.faction === c.faction && !x.captured && !x.dead && x.mission && x.mission.type === m.type && x.mission.target === m.target) : [c];
+      const odds = c.faction === s.player || s.observer ? ` · ${Math.round(missionChance(s, team, m.type, m.target) * 100)}%` : '';
+      const with_ = team.length > 1 ? ` with ${team.filter(x => x !== c).map(x => esc(x.name)).join(', ')}` : '';
+      status = `<span class="sub">${MISSION_LABEL[m.type]} ${m.phase === 'travel' ? 'en route to' : 'on'} ${esc(s.planets[m.target].name)}${with_} (${hrs(m.hoursLeft)}${odds})</span>`;
+    }
     else if (c.assignment?.kind === 'fleet') { const fl = s.fleets.find(x => x.id === (c.assignment as { fleetId: number }).fleetId); status = `<span class="sub clickable" data-action="selectFleet" data-id="${fl?.id}">commanding ${esc(fl?.name ?? 'fleet')}</span>`; }
     else if (c.assignment?.kind === 'governor') status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">governing ${esc(s.planets[c.at].name)}</span>`;
     else status = `<span class="sub clickable" data-action="selectPlanet" data-id="${c.at}">${esc(s.planets[c.at].name)}</span>`;
@@ -259,7 +265,7 @@ export class Hud {
     if (withButtons && isIdle(c)) {
       const canRecruit = roster(s, c.faction).length < ROSTER_CAP[c.faction];
       const canRescue = captives(s, c.faction).length > 0;
-      const types = (['diplomacy', 'espionage', 'sabotage', 'incite', 'recruit', 'rescue'] as MissionType[]).filter(t => (t !== 'recruit' || canRecruit) && (t !== 'rescue' || canRescue));
+      const types = (['diplomacy', 'espionage', 'sabotage', 'incite', 'recruit', 'rescue', 'abduct'] as MissionType[]).filter(t => (t !== 'recruit' || canRecruit) && (t !== 'rescue' || canRescue));
       buttons = `<div class="missions">${types.map(t =>
         `<button class="small ${target && target.charId === c.id && target.type === t ? 'active' : ''}" data-action="mission" data-char="${c.id}" data-type="${t}" title="${esc(MISSION_DESC[t])}">${MISSION_LABEL[t]}</button>`).join('')}`;
       const p = s.planets[c.at];

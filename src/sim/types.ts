@@ -63,7 +63,7 @@ export interface Fleet {
   travel: Travel | null;
 }
 
-export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite' | 'recruit' | 'rescue';
+export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite' | 'recruit' | 'rescue' | 'abduct';
 export interface Mission {
   type: MissionType;
   target: number;

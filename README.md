@@ -36,8 +36,11 @@ npm run build      # typecheck + production bundle in dist/
   upgrades (levels 1-3 gate ship classes) and orbital defense platforms.
 - **Leaders** run missions: Diplomacy, Espionage (reveals a system; Imperial agents can locate
   the Rebel base), Sabotage, Incite Uprising, Recruit (find new leaders on your worlds or
-  sympathetic neutrals; the Rebellion recruits more easily and has a larger roster) and Rescue
-  (break a captured leader out). Failed missions on enemy worlds risk capture. Captives are
+  sympathetic neutrals; the Rebellion recruits more easily and has a larger roster) Rescue
+  (break a captured leader out) and Abduct (seize an enemy leader known to be on a world and hold
+  them on one of yours). Rescue and Abduct are team missions: send several leaders at the same
+  world and their odds stack; they resolve together, and on failure each risks capture. Mission
+  odds are shown on the leader's row. Failed missions on enemy worlds risk capture. Captives are
   interrogated daily: a Rebel captive may give up the base's location, and captives sometimes
   escape or are freed when their world is liberated. Instead of missions, a leader can be assigned
   to **govern** a world (faster loyalty, harder for enemy agents) or **command** a fleet (leadership

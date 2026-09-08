@@ -1,7 +1,7 @@
 import { classesFor, classStrength, shipClass } from './ships';
 import { enemyOf, type BuildItem, type FactionId, type Fleet, type GameState, type Planet } from './types';
 import { hopDistances, findPath, pathLength } from './pathfinding';
-import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP } from './sim';
+import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP, charactersAt, missionChance } from './sim';
 
 export function runAI(s: GameState, f: FactionId): void {
   const enemy = enemyOf(f);
@@ -149,10 +149,21 @@ export function runAI(s: GameState, f: FactionId): void {
     if (here && assignCommander(s, c, here)) break;
   }
   const idle2 = s.characters.filter(c => c.faction === f && isIdle(c));
-  // rescue captives
+  // rescue captives, in teams of up to two
   for (const cap of captives(s, f)) {
-    const rescuer = idle2.filter(c => Math.max(c.sabotage, c.espionage) >= 3 && !missionProblem(s, c, 'rescue', cap.at)).sort((a, b) => Math.max(b.sabotage, b.espionage) - Math.max(a.sabotage, a.espionage))[0];
-    if (rescuer && rng.chance(0.5)) { orderMission(s, rescuer, 'rescue', cap.at); idle2.splice(idle2.indexOf(rescuer), 1); }
+    const rescuers = idle2.filter(c => Math.max(c.sabotage, c.espionage) >= 3 && !missionProblem(s, c, 'rescue', cap.at)).sort((a, b) => Math.max(b.sabotage, b.espionage) - Math.max(a.sabotage, a.espionage)).slice(0, 2);
+    if (rescuers.length && rng.chance(0.5)) for (const r of rescuers) { orderMission(s, r, 'rescue', cap.at); idle2.splice(idle2.indexOf(r), 1); }
+  }
+  // the Empire hunts Mon Mothma; both sides snatch exposed leaders when the odds are decent
+  {
+    const agents = idle2.filter(c => Math.max(c.sabotage, c.espionage) >= 4).sort((a, b) => Math.max(b.sabotage, b.espionage) - Math.max(a.sabotage, a.espionage));
+    if (agents.length && rng.chance(f === 'empire' ? 0.5 : 0.25)) {
+      const hops = hopDistances(s.lanes, agents[0].at);
+      const prize = s.planets.filter(p => (hops.get(p.id) ?? 99) <= 5 && !missionProblem(s, agents[0], 'abduct', p.id))
+        .map(p => ({ p, score: (charactersAt(s, p.id, enemy).some(c => c.name === 'Mon Mothma') ? 5 : 1) * missionChance(s, agents.slice(0, 2), 'abduct', p.id) }))
+        .sort((a, b) => b.score - a.score)[0];
+      if (prize && prize.score >= 0.35) for (const a of agents.slice(0, 2)) { orderMission(s, a, 'abduct', prize.p.id); idle2.splice(idle2.indexOf(a), 1); }
+    }
   }
   // recruit while the roster has room
   if (roster(s, f).length < ROSTER_CAP[f]) {
