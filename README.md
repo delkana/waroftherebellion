@@ -28,8 +28,7 @@ npm run build      # typecheck + production bundle in dist/
   pre-Yavin strongholds (Yavin, Dantooine, Mon Calamari, Sullust, Toprawa); the other 44 worlds are
   neutral, leaning by canon sympathy (Alderaan, Chandrila, Kashyyyk, Ryloth toward the Rebellion;
   Kamino, Mustafar, Muunilinst, Scarif toward the Empire). Starting worlds are scattered, not
-  contiguous, and the hidden base is a random remote world (Yavin, Dantooine, Toprawa, Mon Calamari,
-  Sullust, Hoth or Endor).
+  contiguous, and the hidden base is one of the five Rebel worlds, chosen at random.
 - **Hyperlanes.** A sparse, non-crossing web of lanes; fleets travel only along them on shortest paths. Arriving at a system
   with enemy warships or enemy-owned defense platforms triggers a battle.
 - **Planets** have loyalty (-100 Empire ... +100 Rebellion) that drives income, uprisings, and

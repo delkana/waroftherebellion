@@ -71,14 +71,13 @@ export function generateGalaxy(opts: GenOptions): GameState {
     if (p.owner === 'rebellion') p.loyalty = Math.max(p.loyalty, 35);
   }
   const empireHq = planets.findIndex(p => p.name === 'Coruscant');
-  // the hidden base: a random remote world; Hoth or Endor join the Alliance if chosen
-  const hqPool = ['Yavin', 'Dantooine', 'Toprawa', 'Mon Calamari', 'Sullust', 'Hoth', 'Endor'];
+  // the hidden base: any one of the Alliance's starting worlds, chosen at random
+  const hqPool = ['Yavin', 'Dantooine', 'Toprawa', 'Mon Calamari', 'Sullust'];
   const hqName = r.pick(hqPool);
   const rebelHq = planets.findIndex(p => p.name === hqName);
   const cap = planets[empireHq];
   cap.loyalty = -90;
   const rebHq = planets[rebelHq];
-  rebHq.owner = 'rebellion';
   rebHq.shipyard = Math.max(rebHq.shipyard, 2); rebHq.defense = Math.max(rebHq.defense, 1); rebHq.garrison = Math.max(rebHq.garrison, 4); rebHq.loyalty = 90;
 
   const state: GameState = {
