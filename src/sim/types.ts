@@ -42,6 +42,8 @@ export interface Planet {
   intel: Record<FactionId, number>;
   /** Set while an enemy fleet sits in orbit (for blockade start/end messages). */
   blockaded?: boolean;
+  /** Reduced to rubble by the Death Star: no production, cannot be taken or joined. */
+  destroyed?: boolean;
 }
 
 export interface Lane { a: number; b: number; length: number }
@@ -65,7 +67,7 @@ export interface Fleet {
   travel: Travel | null;
 }
 
-export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite' | 'recruit' | 'rescue' | 'abduct';
+export type MissionType = 'diplomacy' | 'espionage' | 'sabotage' | 'incite' | 'recruit' | 'rescue' | 'abduct' | 'deathstar';
 export interface Mission {
   type: MissionType;
   target: number;
@@ -130,6 +132,22 @@ export interface GameState {
   observer?: boolean;
   /** Observer mode: resolve battles automatically instead of prompting. */
   autoBattles?: boolean;
+  /** The Death Star, once the catch-up event has fired. */
+  deathStar?: DeathStar;
+  /** Catch-up events that have already fired this game. */
+  events?: { deathStar?: boolean };
+}
+
+export interface DeathStar {
+  at: number;            // planet it currently orbits
+  destroyed: boolean;
+  hoursSinceMove: number;
+  /** Worlds it has reduced to rubble. */
+  kills: number[];
+  /** True when it announced itself by destroying Alderaan (the Rebellion was snowballing). */
+  alderaan: boolean;
+  /** Game hour from which the trench run is possible (the plans must reach the Alliance first). */
+  vulnerableAt?: number;
 }
 
 export const HOURS_PER_DAY = 24;

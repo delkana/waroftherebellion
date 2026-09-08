@@ -60,6 +60,14 @@ npm run build      # typecheck + production bundle in dist/
   hyperspace jumps. Either side can flee, but no fleet can jump to hyperspace until the battle is a minute old; a good admiral spools the jump faster after that. An Imperial **Interdictor Cruiser** projects a gravity well: while one lives, the enemy cannot jump out at all, so killing it becomes the priority.
 - **AI** opponent builds a balanced fleet, hunts your base, launches invasions, and runs its own
   leaders' missions.
+- **The Death Star** is the catch-up event. From day 20, if one side is running away with the war
+  (about 1.6× the worlds and a clear fleet advantage), the battle station enters play. If the Empire
+  is ahead it appears at an Imperial world and jumps one system toward the Rebel base every four
+  days, spreading fear (non-Imperial worlds drift toward the Empire); if it arrives, the base world is
+  destroyed. If the Rebellion is ahead it announces itself by destroying Alderaan, which swings every
+  non-Rebel world hard toward the Empire, then begins the same march. Luke, Leia and Han can fly the
+  **Trench Run** (any of them; all three together for the best odds). Destroying it turns the galaxy
+  against the Empire. Failure can cost a hero their freedom or their life.
 - **Observer mode** from the main menu: both sides are played by the AI with the whole galaxy revealed. Battles auto-resolve by default; switch the top-bar toggle to "watch" to be offered a front-row seat at each one.
 - **Save / Load** via the top bar (localStorage).
 

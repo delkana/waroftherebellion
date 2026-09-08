@@ -1,7 +1,7 @@
 import { Rng } from '../core/rng';
 import { classesFor, classStrength, COURIER_SPEED, DEFENSE_COST, DEFENSE_HOURS, MAX_DEFENSE, SHIPYARD_COST, SHIPYARD_HOURS, shipClass, TROOP_COST, TROOP_HOURS } from './ships';
-import { enemyOf, FACTIONS, HOURS_PER_DAY, type BuildItem, type Character, type FactionId, type Fleet, type GameState, type LogEntry, type MissionType, type Planet } from './types';
-import { findPath, laneBetween, pathLength } from './pathfinding';
+import { enemyOf, FACTIONS, HOURS_PER_DAY, dayOf, type BuildItem, type Character, type FactionId, type Fleet, type GameState, type LogEntry, type MissionType, type Planet } from './types';
+import { findPath, laneBetween, pathLength, hopDistances } from './pathfinding';
 import { runAI } from './ai';
 import { canSeeDetails } from './visibility';
 
@@ -9,7 +9,7 @@ export const rng = new Rng(12345);
 
 export function log(s: GameState, text: string, kind: LogEntry['kind'] = 'info', faction: FactionId | 'all' = 'all', planet?: number): void {
   s.log.push({ time: s.hours, text, kind, faction, planet });
-  if (s.log.length > 200) s.log.splice(0, s.log.length - 200);
+  if (s.log.length > 600) s.log.splice(0, s.log.length - 600);
 }
 
 // ---------------------------------------------------------------- queries
@@ -99,6 +99,7 @@ export function orderStop(s: GameState, fleet: Fleet): void {
 export function canInvade(s: GameState, fleet: Fleet): { ok: boolean; reason: string } {
   if (fleet.at === null) return { ok: false, reason: 'In transit' };
   const p = s.planets[fleet.at];
+  if (p.destroyed) return { ok: false, reason: 'Nothing left to take' };
   if (p.owner === fleet.faction) return { ok: false, reason: 'Friendly planet' };
   if (fleet.troops <= 0) return { ok: false, reason: 'No troops aboard' };
   if (hasArmedEnemy(s, p.id, fleet.faction)) return { ok: false, reason: 'Enemy fleet in orbit' };
@@ -156,10 +157,12 @@ export function transferTroops(s: GameState, fleet: Fleet, amount: number): bool
   return true;
 }
 
-export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36, recruit: 48, rescue: 24, abduct: 24 };
+export const MISSION_HOURS: Record<MissionType, number> = { diplomacy: 36, espionage: 24, sabotage: 30, incite: 36, recruit: 48, rescue: 24, abduct: 24, deathstar: 12 };
 /** Missions several leaders can run together against one target; each extra member raises the odds. */
-export const TEAM_MISSIONS: MissionType[] = ['rescue', 'abduct'];
-export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising', recruit: 'Recruit', rescue: 'Rescue', abduct: 'Abduct' };
+export const TEAM_MISSIONS: MissionType[] = ['rescue', 'abduct', 'deathstar'];
+/** The only pilots who can fly the trench run. */
+export const TRENCH_RUN_PILOTS = ['Luke Skywalker', 'Leia Organa', 'Han Solo'];
+export const MISSION_LABEL: Record<MissionType, string> = { diplomacy: 'Diplomacy', espionage: 'Espionage', sabotage: 'Sabotage', incite: 'Incite Uprising', recruit: 'Recruit', rescue: 'Rescue', abduct: 'Abduct', deathstar: 'Trench Run' };
 export const MISSION_DESC: Record<MissionType, string> = {
   diplomacy: 'Raise the planet\'s loyalty to your cause. Neutral planets join you at high loyalty.',
   espionage: 'Reveal enemy fleets, garrisons and production. The Empire may locate the hidden Rebel base.',
@@ -168,6 +171,7 @@ export const MISSION_DESC: Record<MissionType, string> = {
   recruit: 'Find a new leader on one of your worlds or a sympathetic neutral. The Rebellion finds them more easily.',
   rescue: 'Break a captured leader out of an enemy world. Risky; sabotage and espionage help. Send several leaders at the same world to raise the odds.',
   abduct: 'Seize an enemy leader known to be on a world and bring them to one of your worlds. Send several leaders at the same world to raise the odds.',
+  deathstar: 'Fly the trench run and destroy the Death Star. Only Luke, Leia and Han can attempt it; send all three for the best odds. Success turns the galaxy against the Empire.',
 };
 
 /** Why a mission cannot target a planet, or null if it can. */
@@ -175,6 +179,7 @@ export function missionProblem(s: GameState, ch: Character, type: MissionType, t
   const p = s.planets[target];
   switch (type) {
     case 'recruit':
+      if (p.destroyed) return 'There is no one left there';
       if (roster(s, ch.faction).length >= ROSTER_CAP[ch.faction]) return 'Roster is full';
       if (p.owner !== ch.faction && !(p.owner === null && alignment(p, ch.faction) > 0)) return 'Needs one of your worlds or a sympathetic neutral';
       return null;
@@ -184,6 +189,13 @@ export function missionProblem(s: GameState, ch: Character, type: MissionType, t
     case 'abduct': {
       if (!canSeeDetails(s, ch.faction, p)) return 'You have no intelligence on who is there';
       if (!charactersAt(s, target, enemyOf(ch.faction)).length) return 'No enemy leader is known to be there';
+      return null;
+    }
+    case 'deathstar': {
+      if (ch.faction !== 'rebellion' || !TRENCH_RUN_PILOTS.includes(ch.name)) return 'Only Luke, Leia or Han can fly the trench run';
+      if (!s.deathStar || s.deathStar.destroyed) return 'There is no Death Star to attack';
+      if (s.deathStar.at !== target) return `The Death Star is at ${s.planets[s.deathStar.at].name}`;
+      if (s.deathStar.vulnerableAt !== undefined && s.hours < s.deathStar.vulnerableAt) return `The Alliance has no plans for the station yet (${Math.ceil((s.deathStar.vulnerableAt - s.hours) / 24)} days)`;
       return null;
     }
     case 'incite': case 'sabotage':
@@ -234,7 +246,8 @@ export function missionChance(s: GameState, team: Character[], type: MissionType
   if (type === 'recruit') chance = 0.2 + skill * 0.08 + (lead.faction === 'rebellion' ? 0.15 : 0) + Math.max(0, alignment(p, lead.faction)) / 250;
   if (type === 'rescue') chance = 0.15 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
   if (type === 'abduct') chance = 0.12 + skill * 0.09 - (hostile ? p.garrison * 0.05 : 0) - charactersAt(s, p.id, enemy).length * 0.05 - (gov && gov.faction === enemy ? 0.05 * gov.espionage : 0);
-  if (TEAM_MISSIONS.includes(type)) chance += Math.min(0.3, 0.1 * (team.length - 1));
+  if (type === 'deathstar') chance = 0.4 + Math.max(...team.map(c => Math.max(c.sabotage, c.leadership))) * 0.08 + (team.some(c => c.name === 'Luke Skywalker') ? 0.12 : 0);
+  if (TEAM_MISSIONS.includes(type)) chance += Math.min(0.3, (type === 'deathstar' ? 0.12 : 0.1) * (team.length - 1));
   return Math.max(0.05, Math.min(0.95, chance));
 }
 
@@ -367,7 +380,8 @@ function substep(s: GameState, dt: number): void {
     } else {
       // neutrals slowly regress to indifference, and join a side at strong loyalty
       p.loyalty *= Math.pow(0.995, dt);
-      if (p.loyalty >= 75) joinFaction(s, p, 'rebellion');
+      if (p.destroyed) { /* rubble joins no one */ }
+      else if (p.loyalty >= 75) joinFaction(s, p, 'rebellion');
       else if (p.loyalty <= -75) joinFaction(s, p, 'empire');
     }
     if (p.invasion) {
@@ -425,6 +439,8 @@ function substep(s: GameState, dt: number): void {
     }
   }
 
+  if (Math.floor(s.hours / HOURS_PER_DAY) !== Math.floor((s.hours - dt) / HOURS_PER_DAY)) dailyEvents(s);
+  stepDeathStar(s, dt);
   // AI
   s.aiTimer += dt;
   if (s.aiTimer >= 6) {
@@ -560,6 +576,18 @@ function resolveMission(s: GameState, c: Character): void {
         }
         break;
       }
+      case 'deathstar': {
+        // the heroes chase the station wherever it has jumped to
+        const ds = s.deathStar;
+        if (ds && !ds.destroyed) {
+          const where = s.planets[ds.at];
+          ds.destroyed = true;
+          for (const q of s.planets) if (!q.destroyed) shiftLoyalty(q, 'rebellion', q.owner === 'empire' ? 15 : 30);
+          log(s, `${who} destroyed the Death Star above ${where.name}! Worlds across the galaxy turn against the Empire.`, mine ? 'good' : 'bad', 'all', where.id);
+          for (const x of team) { x.at = where.id; evacuate(s, x); }
+        } else log(s, `${who}: the Death Star was already gone`, 'info', c.faction, p.id);
+        break;
+      }
       case 'abduct': {
         const targets = charactersAt(s, p.id, enemy);
         const victim = targets.length ? rng.pick(targets) : null;
@@ -583,6 +611,16 @@ function resolveMission(s: GameState, c: Character): void {
   } else {
     const captureChance = hostile ? (m.type === 'diplomacy' ? 0.1 : m.type === 'rescue' || m.type === 'abduct' ? 0.35 : 0.3) : (m.type === 'recruit' ? 0 : m.type === 'abduct' ? 0.15 : 0.03);
     let anyCaptured = false;
+    if (m.type === 'deathstar') {
+      const dsAt = s.deathStar && !s.deathStar.destroyed ? s.deathStar.at : p.id;
+      for (const x of team) x.at = dsAt;
+      for (const x of team) {
+        if (rng.chance(0.1)) { anyCaptured = true; captureCharacter(s, x, dsAt); log(s, `${x.title} ${x.name} was captured after the failed trench run`, mine ? 'bad' : 'good', 'all', dsAt); }
+        else evacuate(s, x);
+      }
+      if (!anyCaptured) log(s, `${who}: the trench run failed; the Death Star holds above ${s.planets[dsAt].name}`, mine ? 'bad' : 'info', 'all', dsAt);
+      return;
+    }
     for (const x of team) {
       if (rng.chance(captureChance)) {
         anyCaptured = true;
@@ -639,6 +677,74 @@ export function nearestOwned(s: GameState, f: FactionId, from: number): number |
 
 export function captureCharacter(s: GameState, c: Character, planetId: number): void {
   c.captured = true; c.captivity = 0; c.assignment = null; c.mission = null; c.at = planetId;
+}
+
+// ---------------------------------------------------------------- the Death Star (catch-up event)
+function momentum(s: GameState): { worlds: Record<FactionId, number>; strength: Record<FactionId, number> } {
+  const worlds = { empire: ownedPlanets(s, 'empire').length, rebellion: ownedPlanets(s, 'rebellion').length };
+  const strength = { empire: 0, rebellion: 0 };
+  for (const f of s.fleets) strength[f.faction] += fleetStrength(f);
+  return { worlds, strength };
+}
+
+/** Once a day: if one side is running away with the war, the Death Star enters play. */
+function dailyEvents(s: GameState): void {
+  if (s.events?.deathStar || dayOf(s.hours) < 20) return;
+  const m = momentum(s);
+  // momentum: territorial lead weighted by fleet lead; 1.6x the worlds at fleet parity, or 1.3x with double the fleet, both count
+  const score = (f: FactionId, e: FactionId) => (m.worlds[f] / (m.worlds[e] + 1)) * Math.sqrt(m.strength[f] / (m.strength[e] + 1));
+  const empireAhead = score('empire', 'rebellion') >= 1.75 && m.worlds.empire >= m.worlds.rebellion * 1.3;
+  const rebelsAhead = score('rebellion', 'empire') >= 1.75 && m.worlds.rebellion >= m.worlds.empire * 1.3;
+  if (!empireAhead && !rebelsAhead) return;
+  s.events = { ...(s.events ?? {}), deathStar: true };
+  const rebHq = s.factions.rebellion.hq;
+  const alderaan = s.planets.find(p => p.name === 'Alderaan');
+  if (rebelsAhead && alderaan && !alderaan.destroyed) {
+    // the Rebellion is winning: the Empire makes an example of Alderaan
+    s.deathStar = { at: alderaan.id, destroyed: false, hoursSinceMove: 0, kills: [], alderaan: true, vulnerableAt: s.hours + 8 * HOURS_PER_DAY };
+    destroyWorld(s, alderaan, 'empire');
+    for (const q of s.planets) if (!q.destroyed && q.owner !== 'rebellion') shiftLoyalty(q, 'empire', 35);
+    log(s, `The Death Star has destroyed Alderaan. Terror grips the galaxy: worlds fall in line behind the Empire.`, s.player === 'empire' ? 'good' : 'bad', 'all', alderaan.id);
+  } else {
+    // the Empire is winning: the battle station is completed and sets out for the Rebel base
+    const hops = hopDistances(s.lanes, rebHq);
+    const start = ownedPlanets(s, 'empire').sort((a, b) => Math.abs((hops.get(a.id) ?? 9) - 4) - Math.abs((hops.get(b.id) ?? 9) - 4) || b.production - a.production)[0];
+    if (!start) return;
+    s.deathStar = { at: start.id, destroyed: false, hoursSinceMove: 0, kills: [], alderaan: false };
+    log(s, `The Death Star is operational above ${start.name} and is moving on the Rebel base. Only its destruction can stop it.`, s.player === 'empire' ? 'good' : 'bad', 'all', start.id);
+  }
+  log(s, s.deathStar.alderaan ? `Rebel agents are racing the stolen plans to the Alliance; in eight days Luke, Leia and Han can attempt the Trench Run.` : `Luke, Leia and Han can attempt the Trench Run against the Death Star (any of them, together for better odds).`, 'info', 'rebellion', s.deathStar.at);
+}
+
+function destroyWorld(s: GameState, p: Planet, by: FactionId): void {
+  p.destroyed = true; p.production = 0; p.owner = null; p.garrison = 0; p.defense = 0; p.shipyard = 0; p.queue = []; p.invasion = null; p.loyalty = 0;
+  for (const c of s.characters) if (c.at === p.id && !c.dead) { if (c.captured) { c.dead = true; } else if (!c.mission) evacuate(s, c); }
+  s.deathStar?.kills.push(p.id);
+  void by;
+}
+
+/** The Death Star creeps one jump toward the Rebel base every four days, spreading fear; reaching it is the end of that world. */
+function stepDeathStar(s: GameState, dt: number): void {
+  const ds = s.deathStar;
+  if (!ds || ds.destroyed) return;
+  // fear: non-Imperial worlds drift toward the Empire while it lives
+  for (const p of s.planets) if (!p.destroyed && p.owner !== 'empire') shiftLoyalty(p, 'empire', dt / HOURS_PER_DAY);
+  ds.hoursSinceMove += dt;
+  if (ds.hoursSinceMove < 6 * HOURS_PER_DAY) return;
+  ds.hoursSinceMove = 0;
+  const target = s.factions.rebellion.hq;
+  if (s.planets[target].owner !== 'rebellion') return; // nothing to hunt
+  const path = findPath(s.lanes, ds.at, target);
+  if (!path || path.length < 2) return;
+  ds.at = path[1];
+  const here = s.planets[ds.at];
+  if (ds.at === target) {
+    destroyWorld(s, here, 'empire');
+    for (const q of s.planets) if (!q.destroyed && q.owner !== 'rebellion') shiftLoyalty(q, 'empire', 15);
+    log(s, `The Death Star has destroyed ${here.name}, the Rebel base. The Alliance scatters.`, s.player === 'empire' ? 'good' : 'bad', 'all', here.id);
+  } else {
+    log(s, `The Death Star has jumped to ${here.name}`, 'info', 'all', here.id);
+  }
 }
 
 export function factionName(f: FactionId): string { return f === 'empire' ? 'Empire' : 'Rebellion'; }

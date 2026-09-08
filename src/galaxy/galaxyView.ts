@@ -229,8 +229,10 @@ export class GalaxyView {
     for (const p of s.planets) {
       const ring = this.rings[p.id];
       const mat = ring.material as THREE.MeshBasicMaterial;
-      mat.color.setHex(p.owner ? FACTION_HEX[p.owner] : 0x555555);
-      mat.opacity = p.owner ? 0.85 : 0.35;
+      mat.color.setHex(p.destroyed ? 0x5a2a2a : p.owner ? FACTION_HEX[p.owner] : 0x555555);
+      mat.opacity = p.destroyed ? 0.5 : p.owner ? 0.85 : 0.35;
+      const pm = this.planetMeshes[p.id].material as THREE.MeshStandardMaterial;
+      if (p.destroyed && pm.color.getHex() !== 0x3a2626) { pm.color.setHex(0x3a2626); pm.emissive.setHex(0x3a1010); }
     }
     // route line for a selected fleet
     const selFleet = this.selection?.kind === 'fleet' ? s.fleets.find(f => f.id === this.selection!.id) : null;
@@ -310,6 +312,20 @@ export class GalaxyView {
           c.fillStyle = FACTION_CSS[ch.faction]; c.beginPath(); c.arc(cx, gy, 3, 0, Math.PI * 2); c.fill();
           c.strokeStyle = '#000'; c.lineWidth = 1; c.stroke();
         });
+      }
+    }
+
+    // --- the Death Star ---
+    if (s.deathStar && !s.deathStar.destroyed) {
+      const p = s.planets[s.deathStar.at];
+      const pr = o.project(p.pos, cam);
+      if (pr.visible) {
+        const r = this.screenRadius(p.radius, p.pos);
+        const x = pr.x - r - 16, y = pr.y - 10;
+        c.beginPath(); c.arc(x, y, 9, 0, Math.PI * 2); c.fillStyle = '#8d949c'; c.fill(); c.lineWidth = 1.5; c.strokeStyle = '#e8eef4'; c.stroke();
+        c.beginPath(); c.arc(x - 3, y - 3, 3, 0, Math.PI * 2); c.fillStyle = '#4a5059'; c.fill();
+        c.beginPath(); c.moveTo(x - 9, y + 1); c.lineTo(x + 9, y + 1); c.strokeStyle = '#4a5059'; c.lineWidth = 1; c.stroke();
+        o.text('Death Star', x, y + 17, { size: 10, color: '#ff8080', bold: true });
       }
     }
 

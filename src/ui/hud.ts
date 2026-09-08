@@ -1,5 +1,5 @@
 import type { BattleSetup, BattleResult } from '../sim/combat';
-import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives, missionChance, TEAM_MISSIONS, VICTORY_TARGETS, leaderNeutralised } from '../sim/sim';
+import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives, missionChance, TEAM_MISSIONS, VICTORY_TARGETS, leaderNeutralised, TRENCH_RUN_PILOTS } from '../sim/sim';
 import { shipClass } from '../sim/ships';
 import { fmtTime, type Character, type FactionId, type Fleet, type GameState, type MissionType, type Planet } from '../sim/types';
 import { canSeeDetails, canSeeFleet, knowsHq } from '../sim/visibility';
@@ -202,8 +202,10 @@ export class Hud {
     const obj = obs ? `<b>Observer.</b> Rebel HQ: <b>${esc(rebHq.name)}</b>${s.factions.empire.knowsEnemyHq ? ' (the Empire knows)' : ' (hidden from the Empire)'}. Select anything to inspect it.` : me === 'empire'
       ? `<b>Objective:</b> take the Rebel headquarters ${s.factions.empire.knowsEnemyHq ? `on <b>${esc(rebHq.name)}</b>` : '(find it with espionage)'} and kill or capture <b>Skywalker</b> and <b>Organa</b>.<br>${targetLine('empire')}<br><b>Defend</b> ${esc(s.planets[s.factions.empire.hq].name)} at all costs.`
       : `<b>Objective:</b> take <b>${esc(s.planets[s.factions.empire.hq].name)}</b> and kill or capture the <b>Emperor</b> and <b>Vader</b>.<br>${targetLine('rebellion')}<br><b>Protect</b> the base on <b>${esc(rebHq.name)}</b> — the Empire ${s.factions.empire.knowsEnemyHq ? '<span class="bad">knows its location!</span>' : 'has not found it yet.'}`;
+    const dsLine = s.deathStar ? (s.deathStar.destroyed ? '<br><span class="good">The Death Star has been destroyed.</span>' : `<br><span class="bad">The Death Star is at ${esc(s.planets[s.deathStar.at].name)}</span>${me === 'rebellion' ? ' — Luke, Leia and Han can fly the Trench Run.' : '.'}`) : '';
     const objEl = this.el('objectives');
-    if (objEl.innerHTML !== obj) objEl.innerHTML = obj;
+    const objAll = obj + dsLine;
+    if (objEl.innerHTML !== objAll) objEl.innerHTML = objAll;
 
     // side panel
     let side = '';
@@ -266,7 +268,8 @@ export class Hud {
     if (withButtons && isIdle(c)) {
       const canRecruit = roster(s, c.faction).length < ROSTER_CAP[c.faction];
       const canRescue = captives(s, c.faction).length > 0;
-      const types = (['diplomacy', 'espionage', 'sabotage', 'incite', 'recruit', 'rescue', 'abduct'] as MissionType[]).filter(t => (t !== 'recruit' || canRecruit) && (t !== 'rescue' || canRescue));
+      const trench = !!s.deathStar && !s.deathStar.destroyed && c.faction === 'rebellion' && TRENCH_RUN_PILOTS.includes(c.name);
+      const types = (['diplomacy', 'espionage', 'sabotage', 'incite', 'recruit', 'rescue', 'abduct', 'deathstar'] as MissionType[]).filter(t => (t !== 'recruit' || canRecruit) && (t !== 'rescue' || canRescue) && (t !== 'deathstar' || trench));
       buttons = `<div class="missions">${types.map(t =>
         `<button class="small ${target && target.charId === c.id && target.type === t ? 'active' : ''}" data-action="mission" data-char="${c.id}" data-type="${t}" title="${esc(MISSION_DESC[t])}">${MISSION_LABEL[t]}</button>`).join('')}`;
       const p = s.planets[c.at];
@@ -285,7 +288,9 @@ export class Hud {
     const mine = p.owner === me && !s.observer;
     const align = alignment(p, me);
     const hq = knowsHq(s, me, p.id);
-    let html = `<h2>${esc(p.name)} ${hq ? `<span class="sub">— ${p.id === s.factions.empire.hq ? 'Imperial capital' : 'Rebel headquarters'}</span>` : ''}</h2>
+    let html = `<h2>${esc(p.name)} ${p.destroyed ? '<span class="bad">— destroyed</span>' : hq ? `<span class="sub">— ${p.id === s.factions.empire.hq ? 'Imperial capital' : 'Rebel headquarters'}</span>` : ''}</h2>`;
+    if (s.deathStar && !s.deathStar.destroyed && s.deathStar.at === p.id) html += `<div class="row bad"><b>The Death Star is in orbit.</b>${me === 'rebellion' ? ' Send Luke, Leia and Han on the Trench Run.' : ''}</div>`;
+    html += `
       <div class="sub">${fac(p.owner)} · ${p.type} world · production ${p.production}/day${mine ? ` · income ${planetIncomePerDay(s, p).toFixed(1)}/day` : ''}</div>
       <h3>Loyalty</h3>
       <div class="loyalty"><i style="left:${((p.loyalty + 100) / 200 * 100).toFixed(1)}%"></i></div>

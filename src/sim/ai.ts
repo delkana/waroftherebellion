@@ -1,7 +1,7 @@
 import { classesFor, classStrength, shipClass } from './ships';
 import { enemyOf, type BuildItem, type FactionId, type Fleet, type GameState, type Planet } from './types';
 import { hopDistances, findPath, pathLength } from './pathfinding';
-import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP, charactersAt, missionChance, VICTORY_TARGETS } from './sim';
+import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP, charactersAt, missionChance, VICTORY_TARGETS, TRENCH_RUN_PILOTS, recallCharacter, relieve } from './sim';
 
 export function runAI(s: GameState, f: FactionId): void {
   const enemy = enemyOf(f);
@@ -99,7 +99,7 @@ export function runAI(s: GameState, f: FactionId): void {
     const hops = hopDistances(s.lanes, fl.at!);
     let best: Planet | null = null, bestScore = 0;
     for (const p of s.planets) {
-      if (p.owner === f || p.id === fl.at) continue;
+      if (p.owner === f || p.id === fl.at || p.destroyed) continue;
       const h = hops.get(p.id) ?? 99;
       if (h > 7) continue;
       const risk = enemyStrengthAt(p.id) + p.defense * platformStrength + (p.owner === enemy ? 6 : 0);
@@ -170,6 +170,16 @@ export function runAI(s: GameState, f: FactionId): void {
     if (here && assignCommander(s, c, here)) break;
   }
   const idle2 = s.characters.filter(c => c.faction === f && isIdle(c));
+  // the trench run: the heroes drop whatever they are doing and go, together
+  if (f === 'rebellion' && s.deathStar && !s.deathStar.destroyed) {
+    const ds = s.deathStar;
+    for (const c of s.characters.filter(c => c.faction === f && !c.captured && !c.dead && TRENCH_RUN_PILOTS.includes(c.name))) {
+      if (c.mission?.type === 'deathstar') continue;
+      if (c.mission && c.mission.phase === 'travel') recallCharacter(s, c);
+      if (c.assignment) relieve(s, c);
+      if (!missionProblem(s, c, 'deathstar', ds.at)) { orderMission(s, c, 'deathstar', ds.at); const i = idle2.indexOf(c); if (i >= 0) idle2.splice(i, 1); }
+    }
+  }
   // rescue captives, in teams of up to two
   for (const cap of captives(s, f)) {
     const rescuers = idle2.filter(c => Math.max(c.sabotage, c.espionage) >= 3 && !missionProblem(s, c, 'rescue', cap.at)).sort((a, b) => Math.max(b.sabotage, b.espionage) - Math.max(a.sabotage, a.espionage)).slice(0, 2);
