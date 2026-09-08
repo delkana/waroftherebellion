@@ -36,7 +36,9 @@ export function runAI(s: GameState, f: FactionId): void {
     const opts = buildOptions(s, p);
     const affordable = (it: BuildItem) => fac.credits - buildCost(it, p) >= reserve;
     let choice: BuildItem | undefined;
-    const wantsTroops = p.garrison < 2 || ((p.id === fac.hq || p.shipyard > 0) && p.garrison < 7 && troopsAboard < troopCap);
+    const neutralsNear = (() => { const h = hopDistances(s.lanes, p.id); return s.planets.filter(q => q.owner === null && (h.get(q.id) ?? 99) <= 3).length; })();
+    // the Empire raises garrison troops wherever neutral worlds are within reach, to go and take them
+    const wantsTroops = p.garrison < 2 || ((p.id === fac.hq || p.shipyard > 0) && p.garrison < 7 && troopsAboard < troopCap) || (f === 'empire' && neutralsNear > 0 && p.garrison < 4);
     if (p.garrison < (p.id === fac.hq ? 4 : 2)) choice = opts.find(o => o.kind === 'troop');
     else if (p.id === fac.hq && p.defense < 2 && fac.credits > 700) choice = opts.find(o => o.kind === 'defense');
     else if (p.shipyard === 0 && p.production >= 8 && fac.credits > 450 && rng.chance(0.5)) choice = opts.find(o => o.kind === 'shipyard');
@@ -45,7 +47,8 @@ export function runAI(s: GameState, f: FactionId): void {
       const ships = opts.filter(o => o.kind === 'ship');
       const total = counts.small + counts.medium + counts.large + 1;
       const want: Record<string, number> = { small: 0.5 - counts.small / total, medium: 0.25 - counts.medium / total, large: 0.25 - counts.large / total };
-      const needTransport = counts.transport < 2 + Math.floor(mine.length / 6);
+      const neutralsLeft = s.planets.filter(q => q.owner === null).length;
+      const needTransport = counts.transport < (f === 'empire' ? 3 + Math.floor(neutralsLeft / 12) : 2 + Math.floor(mine.length / 6));
       let best: BuildItem | undefined, bestScore = -Infinity;
       for (const it of ships) {
         const c = shipClass(it.cls!);
@@ -82,7 +85,8 @@ export function runAI(s: GameState, f: FactionId): void {
       const canTake = fl.troops >= needTroops;
       if (p.owner === null && !canTake) continue;
       if (str < risk * 1.25) continue;
-      let value = p.production + p.shipyard * 6 + (p.owner === enemy ? 12 : 4);
+      let value = p.production + p.shipyard * 6 + (p.owner === enemy ? 12 : f === 'empire' ? 8 : 4);
+      if (p.owner === null && alignment(p, enemy) > 20) value += f === 'empire' ? 10 : 4; // secure it before it joins the other side
       if (p.owner === enemy && p.id === s.factions[enemy].hq && (f === 'rebellion' || fac.knowsEnemyHq)) value += 80;
       if (!canTake) value *= 0.45; // just a raid / blockade
       const score = value / (1 + h * 0.6) * rng.range(0.8, 1.2);
@@ -126,7 +130,7 @@ export function runAI(s: GameState, f: FactionId): void {
       }
       if (str < 70) continue;
     }
-    if (str < 25) continue;
+    if (str < 25 && fl.troops === 0) continue; // small groups may still go and land troops
 
     const best = chooseTarget(fl, str);
     if (best) { orderMove(s, fl, best.id); continue; }
