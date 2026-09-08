@@ -37,6 +37,7 @@ export interface HudActions {
   toMenu(): void;
   battleSpeed(n: number): void;
   battleRetreat(): void;
+  battleCancelRetreat(): void;
   battleSelectClass(cls: string): void;
   battleSelectAll(): void;
   battleFormation(f: Formation): void;
@@ -111,6 +112,7 @@ export class Hud {
       case 'menu': this.a.toMenu(); break;
       case 'bspeed': this.a.battleSpeed(num('speed')); break;
       case 'retreat': this.a.battleRetreat(); break;
+      case 'cancelRetreat': this.a.battleCancelRetreat(); break;
       case 'bclass': this.a.battleSelectClass(d.cls!); break;
       case 'bselectall': this.a.battleSelectAll(); break;
       case 'bform': this.a.battleFormation(d.form as Formation); break;
@@ -425,7 +427,9 @@ export class Hud {
       </span>
       <span class="stat" style="color:#8a98a8">${sim.time.toFixed(0)}s</span>
       <button class="small" data-action="bmute" title="Toggle sound (M)">${muted ? 'Sound off' : 'Sound on'}</button>
-      ${sim.observer ? '' : `<button class="danger" data-action="retreat" ${sim.retreating[me] || sim.over ? 'disabled' : ''}>Retreat</button>`}`;
+      ${sim.observer ? '' : sim.retreating[me] && !sim.over
+        ? `<button class="danger" data-action="cancelRetreat" title="Call off the retreat and fight">${sim.interdicted(me) ? 'Pinned by Interdictor! Cancel retreat' : `Retreating (${Math.ceil(sim.retreatTimer[me])}s) · cancel`}</button>`
+        : `<button class="danger" data-action="retreat" ${sim.over ? 'disabled' : ''} title="Order all ships to disengage and jump out. Hyperdrives cannot jump until the battle is at least a minute old, and not at all while an enemy Interdictor lives.">${sim.interdicted(me) ? 'Retreat (Interdictor!)' : sim.time < 60 ? `Retreat (jump in ${Math.ceil(60 - sim.time)}s)` : 'Retreat'}</button>`}`;
     const btop = this.el('btop');
     if (btop.innerHTML !== top) btop.innerHTML = top;
 

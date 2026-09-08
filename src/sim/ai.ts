@@ -50,6 +50,7 @@ export function runAI(s: GameState, f: FactionId): void {
       for (const it of ships) {
         const c = shipClass(it.cls!);
         let score = c.shape === 'transport' ? (needTransport ? 0.4 : -1) : want[c.size] + rng.range(0, 0.15);
+        if (c.interdictor) score = myFleetShips.filter(sh => sh.cls === c.id).length < 2 && fac.credits > 900 ? 0.35 : -5;
         if (c.size === 'large' && p.shipyard >= 2) score += 0.1;
         if (!affordable(it)) score -= 5;
         if (score > bestScore) { bestScore = score; best = it; }

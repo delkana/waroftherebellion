@@ -528,8 +528,11 @@ export class BattleView {
     }
 
     for (const side of ['empire', 'rebellion'] as FactionId[]) {
-      if (this.sim.retreating[side] && this.sim.retreatTimer[side] > 0) {
-        o.text(`${side === 'empire' ? 'Imperial' : 'Rebel'} fleet jumping to hyperspace in ${Math.ceil(this.sim.retreatTimer[side])}s`, o.width / 2, 60, { size: 14, color: FACTION_CSS[side], bold: true });
+      if (this.sim.retreating[side]) {
+        const who = side === 'empire' ? 'Imperial' : 'Rebel';
+        const y = 60 + (side === 'rebellion' ? 18 : 0);
+        if (this.sim.interdicted(side)) o.text(`${who} fleet disengaging — jump blocked by Interdictor gravity well!`, o.width / 2, y, { size: 14, color: '#ff6b6b', bold: true });
+        else if (this.sim.retreatTimer[side] > 0) o.text(`${who} fleet disengaging — hyperspace jump in ${Math.ceil(this.sim.retreatTimer[side])}s`, o.width / 2, y, { size: 14, color: FACTION_CSS[side], bold: true });
       }
     }
   }

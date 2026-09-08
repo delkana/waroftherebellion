@@ -212,6 +212,7 @@ const hud = new Hud(document.getElementById('hud')!, {
   },
   battleSpeed(n) { if (battle) battle.speed = n; },
   battleRetreat() { if (battle) battle.sim.cmdRetreat(battle.sim.playerSide); },
+  battleCancelRetreat() { if (battle) battle.sim.cmdCancelRetreat(battle.sim.playerSide); },
   battleSelectClass(cls) { if (battle) battle.view.selectUnits(battle.sim.alive(battle.sim.playerSide).filter(u => u.cls.id === cls)); },
   battleSelectAll() { if (battle) battle.view.selectUnits(battle.sim.alive(battle.sim.playerSide)); },
   battleFormation(f) { if (battle) battle.view.setFormation(f); },

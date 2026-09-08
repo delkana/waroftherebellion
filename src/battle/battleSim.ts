@@ -47,6 +47,8 @@ export interface HitFlash { pos: THREE.Vector3; age: number; shield: boolean; un
 export interface SfxEvent { type: 'fire' | 'hit' | 'explode' | 'jump'; kind?: WeaponKind; side: FactionId; pos: THREE.Vector3; size?: number; shield?: boolean }
 
 const ARENA = 170;
+/** Seconds into a battle before any fleet can jump to hyperspace. */
+export const MIN_JUMP_TIME = 60;
 const DAMAGE_SCALE = 0.5;
 const sizeMult = (w: WeaponDef, t: ShipClass) => t.size === 'small' ? w.vsSmall : t.size === 'medium' ? (w.vsSmall + w.vsLarge) / 2 : w.vsLarge;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -194,8 +196,17 @@ export class BattleSim {
   cmdRetreat(side: FactionId): void {
     if (this.retreating[side]) return;
     this.retreating[side] = true;
-    this.retreatTimer[side] = Math.max(6, 12 - this.setup.command[side] * 0.9); // seconds until hyperspace jump; a good admiral gets the fleet out faster
+    // hyperdrives need a minute in-system to plot a jump; after that a good admiral gets the fleet out faster
+    const spool = Math.max(6, 12 - this.setup.command[side] * 0.9);
+    this.retreatTimer[side] = Math.max(spool, MIN_JUMP_TIME - this.time);
     for (const u of this.alive(side)) if (u.cls.speed > 0) u.order = { type: 'retreat' };
+  }
+
+  /** Call off a retreat (e.g. to fight through an interdictor); ships re-engage on their own. */
+  cmdCancelRetreat(side: FactionId): void {
+    if (!this.retreating[side]) return;
+    this.retreating[side] = false;
+    for (const u of this.alive(side)) if (u.order.type === 'retreat') u.order = { type: 'idle' };
   }
 
   // ------------------------------------------------------------ step
@@ -220,7 +231,8 @@ export class BattleSim {
     for (const side of ['empire', 'rebellion'] as FactionId[]) {
       if (this.retreating[side]) {
         this.retreatTimer[side] -= dt;
-        if (this.retreatTimer[side] <= 0) for (const u of this.alive(side)) if (u.cls.speed > 0) {
+        // an enemy gravity well holds the fleet in realspace until the interdictor is destroyed
+        if (this.retreatTimer[side] <= 0 && !this.interdicted(side)) for (const u of this.alive(side)) if (u.cls.speed > 0) {
           u.escaped = true;
           this.explosions.push({ pos: u.pos.clone(), age: 0, life: 0.5, size: u.cls.scale * 2 });
           this.sfx.push({ type: 'jump', side, pos: u.pos.clone(), size: u.cls.scale });
@@ -241,6 +253,16 @@ export class BattleSim {
       live[0].strafe = oldLeader.strafe; live[0].breakPoint.copy(oldLeader.breakPoint); live[0].breakTimer = oldLeader.breakTimer;
     }
     live.forEach((m, i) => { m.slot = i; });
+  }
+
+  /** A retreating side may leave once its jump is plotted and no gravity well holds it. */
+  canJump(side: FactionId): boolean {
+    return this.retreating[side] && this.retreatTimer[side] <= 0 && !this.interdicted(side);
+  }
+
+  /** True while the enemy has a live interdictor pinning this side in realspace. */
+  interdicted(side: FactionId): boolean {
+    return this.alive(enemyOf(side)).some(u => u.cls.interdictor);
   }
 
   private enemyCentroid(side: FactionId): THREE.Vector3 {
@@ -270,7 +292,7 @@ export class BattleSim {
       const leaderSpeed = L.vel.length();
       speedCap = Math.min(cls.speed, Math.max(cls.speed * 0.4, leaderSpeed + (d - 2) * 4));
       if (L.order.type === 'attack') faceTarget = L.order.target;
-      if (L.order.type === 'retreat' && Math.hypot(u.pos.x, u.pos.z) > ARENA + 40) u.escaped = true;
+      if (L.order.type === 'retreat' && Math.hypot(u.pos.x, u.pos.z) > ARENA + 40 && this.canJump(u.side)) u.escaped = true;
     } else {
       switch (u.order.type) {
         case 'move':
@@ -343,7 +365,9 @@ export class BattleSim {
         if (r > ARENA) { u.pos.x *= ARENA / r; u.pos.z *= ARENA / r; }
         u.pos.y = Math.max(-60, Math.min(60, u.pos.y));
       } else if (Math.hypot(u.pos.x, u.pos.z) > ARENA + 40) {
-        u.escaped = true;
+        // running for the edge only helps once the jump is plotted and no gravity well holds the fleet
+        if (this.canJump(u.side)) u.escaped = true;
+        else { const r = Math.hypot(u.pos.x, u.pos.z); u.pos.x *= (ARENA + 40) / r; u.pos.z *= (ARENA + 40) / r; }
       }
     } else if (faceTarget) {
       turnToward(u.fwd, faceTarget.pos.clone().sub(u.pos).normalize(), cls.turn * dt);
@@ -470,13 +494,19 @@ export class BattleSim {
 
   /** AI commander for one side. */
   think(side: FactionId): void {
-    if (this.retreating[side]) return;
+    if (this.retreating[side]) {
+      // pinned by a gravity well: the whole fleet turns on the interdictor
+      const well = this.alive(enemyOf(side)).find(u => u.cls.interdictor);
+      if (well) this.cmdAttack(this.alive(side).filter(u => u.cls.weapons.length > 0), well);
+      return;
+    }
     const mine = this.alive(side);
     const theirs = this.alive(enemyOf(side));
     if (!mine.length || !theirs.length) return;
     const myStr = this.sideStrength(side), theirStr = this.sideStrength(enemyOf(side));
     const mobile = mine.some(u => u.cls.speed > 0);
-    if (mobile && myStr < this.startStrength[side] * 0.25 && theirStr > myStr * 2 && this.time > 45) { this.cmdRetreat(side); return; }
+    // fleeing is a real option: badly losing sides run for it (and must survive until the jump is ready)
+    if (mobile && myStr < this.startStrength[side] * 0.35 && theirStr > myStr * 1.6 && this.time > 30) { this.cmdRetreat(side); return; }
     for (const u of mine) {
       if (this.isWingman(u)) continue;
       if (u.cls.shape === 'transport') {

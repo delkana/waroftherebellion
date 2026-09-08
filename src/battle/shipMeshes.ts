@@ -134,6 +134,15 @@ export function buildShipMesh(cls: ShipClass, faction: FactionId): THREE.Group {
         g.add(wedge(0.7, 0.22, 2.2, hull, 0, 0, 0));
         g.add(box(0.5, 0.18, 1.0, hull, 0, 0.16, -0.5));
         g.add(box(0.3, 0.25, 0.3, dark, 0, 0.36, -0.7));
+        if (cls.interdictor) {
+          // four gravity-well projector domes
+          const domeMat = mat(0x6a7480, { emissive: 0x3060a0, emissiveIntensity: 0.6, metal: 0.5, rough: 0.5 });
+          for (const [x, z] of [[0.28, 0.1], [-0.28, 0.1], [0.28, -0.6], [-0.28, -0.6]]) {
+            const d = new THREE.Mesh(geo('dome', () => new THREE.SphereGeometry(0.16, 12, 8)), domeMat);
+            d.position.set(x, 0.22, z);
+            g.add(d);
+          }
+        }
         for (const x of [-0.2, 0, 0.2]) g.add(box(0.12, 0.12, 0.1, engine, x, 0, -1.12));
         g.add(box(0.08, 0.08, 0.3, dark, 0.25, 0.1, 0.2));
         g.add(box(0.08, 0.08, 0.3, dark, -0.25, 0.1, 0.2));

@@ -34,6 +34,8 @@ export interface ShipClass {
   troopCap: number;
   scale: number;      // visual scale
   role: string;
+  /** Gravity-well generator: enemies cannot jump to hyperspace while one is alive in the battle. */
+  interdictor?: boolean;
 }
 
 const laser = (o: Partial<WeaponDef> = {}): WeaponDef => ({ kind: 'laser', dmg: 5, range: 14, cooldown: 0.35, speed: 90, vsSmall: 1, vsLarge: 0.35, count: 1, ...o });
@@ -50,6 +52,7 @@ export const SHIP_CLASSES: Record<string, ShipClass> = {
   lancer: { id: 'lancer', name: 'Lancer Frigate', faction: 'empire', size: 'medium', shape: 'corvette', hp: 380, shield: 180, speed: 15, accel: 10, turn: 1.1, weapons: [flak({ count: 3 })], cost: 130, buildHours: 14, minShipyard: 1, hyperSpeed: 3, troopCap: 0, scale: 1.4, role: 'Anti-starfighter escort' },
   victory: { id: 'victory', name: 'Victory Star Destroyer', faction: 'empire', size: 'large', shape: 'frigate', hp: 1150, shield: 570, speed: 9, accel: 5, turn: 0.65, weapons: [turbo(), laser({ count: 2 }), torpedo({ range: 26 })], cost: 340, buildHours: 32, minShipyard: 2, hyperSpeed: 2.4, troopCap: 3, scale: 2.5, role: 'Line warship' },
   isd: { id: 'isd', name: 'Imperial Star Destroyer', faction: 'empire', size: 'large', shape: 'capital', hp: 3200, shield: 1500, speed: 6, accel: 3, turn: 0.4, weapons: [turbo({ count: 4, dmg: 36, range: 40 }), laser({ count: 3 }), ion()], cost: 950, buildHours: 72, minShipyard: 3, hyperSpeed: 1.8, troopCap: 6, scale: 4.4, role: 'Capital ship' },
+  interdictor: { id: 'interdictor', name: 'Interdictor Cruiser', faction: 'empire', size: 'large', shape: 'frigate', hp: 950, shield: 520, speed: 8, accel: 4, turn: 0.6, weapons: [flak({ count: 2 }), laser({ count: 2 })], cost: 520, buildHours: 40, minShipyard: 2, hyperSpeed: 2.4, troopCap: 0, scale: 2.6, role: 'Gravity well: enemies cannot jump out while it lives', interdictor: true },
   acclamator: { id: 'acclamator', name: 'Acclamator Assault Ship', faction: 'empire', size: 'medium', shape: 'transport', hp: 450, shield: 160, speed: 9, accel: 5, turn: 0.8, weapons: [laser({ count: 2 })], cost: 120, buildHours: 12, minShipyard: 1, hyperSpeed: 1.8, troopCap: 6, scale: 1.7, role: 'Troop transport' },
   // ---- Rebel Alliance ----
   xwing: { id: 'xwing', name: 'X-wing', faction: 'rebellion', size: 'small', shape: 'fighter', hp: 190, shield: 70, speed: 30, accel: 32, turn: 2.6, weapons: [laser({ dmg: 5, cooldown: 0.3, count: 2 }), torpedo({ dmg: 40, cooldown: 12, range: 16 })], cost: 55, buildHours: 6, minShipyard: 1, hyperSpeed: 3.5, troopCap: 0, scale: 0.65, role: 'Multi-role fighter' },

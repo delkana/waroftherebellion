@@ -49,7 +49,7 @@ npm run build      # typecheck + production bundle in dist/
   flights of four that make strafing runs together, capital ships hold at stand-off range, shields
   recharge, ion weapons strip shields, torpedoes home on large hulls. Capital ships die in stages
   with a moment of slow motion. Procedural sound (no assets) for weapons, hits, explosions and
-  hyperspace jumps. Retreating fleets jump out after 12 seconds.
+  hyperspace jumps. Either side can flee, but no fleet can jump to hyperspace until the battle is a minute old; a good admiral spools the jump faster after that. An Imperial **Interdictor Cruiser** projects a gravity well: while one lives, the enemy cannot jump out at all, so killing it becomes the priority.
 - **AI** opponent builds a balanced fleet, hunts your base, launches invasions, and runs its own
   leaders' missions.
 - **Observer mode** from the main menu: both sides are played by the AI with the whole galaxy revealed. Battles auto-resolve by default; switch the top-bar toggle to "watch" to be offered a front-row seat at each one.
