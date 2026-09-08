@@ -1,5 +1,5 @@
 import type { BattleSetup, BattleResult } from '../sim/combat';
-import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives, missionChance, TEAM_MISSIONS } from '../sim/sim';
+import { alignment, buildCost, buildOptions, canInvade, charactersAt, factionName, fleetStrength, fleetTroopCap, fleetsAt, MISSION_DESC, MISSION_LABEL, planetIncomePerDay, fleetCommander, governorOf, isIdle, roster, ROSTER_CAP, captives, missionChance, TEAM_MISSIONS, VICTORY_TARGETS, leaderNeutralised } from '../sim/sim';
 import { shipClass } from '../sim/ships';
 import { fmtTime, type Character, type FactionId, type Fleet, type GameState, type MissionType, type Planet } from '../sim/types';
 import { canSeeDetails, canSeeFleet, knowsHq } from '../sim/visibility';
@@ -198,9 +198,10 @@ export class Hud {
 
     // objectives
     const rebHq = s.planets[s.factions.rebellion.hq];
+    const targetLine = (f: FactionId) => VICTORY_TARGETS[f].map(n => { const c = s.characters.find(x => x.name === n); const st = !c || c.dead ? 'dead' : c.captured ? 'captured' : 'at large'; return `${esc(n)}: <span class="${st === 'at large' ? 'bad' : 'good'}">${st}</span>`; }).join(' · ');
     const obj = obs ? `<b>Observer.</b> Rebel HQ: <b>${esc(rebHq.name)}</b>${s.factions.empire.knowsEnemyHq ? ' (the Empire knows)' : ' (hidden from the Empire)'}. Select anything to inspect it.` : me === 'empire'
-      ? `<b>Objective:</b> locate and capture the hidden Rebel headquarters. ${s.factions.empire.knowsEnemyHq ? `Intelligence places it on <b>${rebHq.name}</b>.` : 'Use espionage on Rebel worlds to find it.'}<br><b>Defend</b> ${esc(s.planets[s.factions.empire.hq].name)} at all costs.`
-      : `<b>Objective:</b> capture <b>${esc(s.planets[s.factions.empire.hq].name)}</b>, the Imperial capital.<br><b>Protect</b> the Alliance headquarters on <b>${rebHq.name}</b> — the Empire ${s.factions.empire.knowsEnemyHq ? '<span class="bad">knows its location!</span>' : 'has not found it yet.'}`;
+      ? `<b>Objective:</b> take the Rebel headquarters ${s.factions.empire.knowsEnemyHq ? `on <b>${esc(rebHq.name)}</b>` : '(find it with espionage)'} and kill or capture <b>Skywalker</b> and <b>Organa</b>.<br>${targetLine('empire')}<br><b>Defend</b> ${esc(s.planets[s.factions.empire.hq].name)} at all costs.`
+      : `<b>Objective:</b> take <b>${esc(s.planets[s.factions.empire.hq].name)}</b> and kill or capture the <b>Emperor</b> and <b>Vader</b>.<br>${targetLine('rebellion')}<br><b>Protect</b> the base on <b>${esc(rebHq.name)}</b> — the Empire ${s.factions.empire.knowsEnemyHq ? '<span class="bad">knows its location!</span>' : 'has not found it yet.'}`;
     const objEl = this.el('objectives');
     if (objEl.innerHTML !== obj) objEl.innerHTML = obj;
 
@@ -298,6 +299,7 @@ export class Hud {
       </div>`;
     const gov = governorOf(s, p.id);
     if (gov && (gov.faction === me || details)) html += `<div class="row"><span class="sub">Governor</span><span class="${gov.faction}">${esc(gov.title)} ${esc(gov.name)}</span></div>`;
+    if (p.blockaded && p.owner) html += `<div class="row bad">Under blockade: no income or construction${p.owner === me ? ' — break it with a fleet' : ''}</div>`;
     if (p.invasion) html += `<div class="row"><span class="${p.invasion.attacker === me ? 'good' : 'bad'}">${factionName(p.invasion.attacker)} invasion: ${p.invasion.troops} regiments</span><span class="sub">${hrs(p.invasion.hoursLeft)}</span></div>`;
     if (p.unrest > 24 && details) html += `<div class="row bad">Unrest is building (${Math.floor(p.unrest / 24)} days)</div>`;
 

@@ -1,7 +1,7 @@
 import { classesFor, classStrength, shipClass } from './ships';
 import { enemyOf, type BuildItem, type FactionId, type Fleet, type GameState, type Planet } from './types';
 import { hopDistances, findPath, pathLength } from './pathfinding';
-import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP, charactersAt, missionChance } from './sim';
+import { buildOptions, buildCost, canInvade, enqueueBuild, factionName, fleetStrength, fleetTroopCap, fleetsAt, hasArmedEnemy, orderInvade, orderMerge, orderMission, orderMove, orderSplit, ownedPlanets, rng, transferTroops, alignment, assignCommander, captives, fleetCommander, isIdle, missionProblem, roster, ROSTER_CAP, charactersAt, missionChance, VICTORY_TARGETS } from './sim';
 
 export function runAI(s: GameState, f: FactionId): void {
   const enemy = enemyOf(f);
@@ -9,8 +9,8 @@ export function runAI(s: GameState, f: FactionId): void {
   const mine = ownedPlanets(s, f);
   if (!mine.length) return;
 
-  // ---- consolidate fleets sitting together ----
-  for (const p of mine) {
+  // ---- consolidate fleets sitting together (anywhere, blockades included) ----
+  for (const p of s.planets) {
     const here = fleetsAt(s, p.id, f);
     if (here.length > 1) {
       here.sort((a, b) => fleetStrength(b) - fleetStrength(a));
@@ -91,7 +91,7 @@ export function runAI(s: GameState, f: FactionId): void {
   const hq = s.planets[fac.hq];
   const hopsFromHq = hopDistances(s.lanes, hq.id);
   const enemyFleets = s.fleets.filter(fl => fl.faction === enemy && fl.at !== null);
-  const threatNearHome = enemyFleets.some(fl => (hopsFromHq.get(fl.at!) ?? 99) <= 2 && fleetStrength(fl) > 20);
+  const threatNearHome = enemyFleets.some(fl => (hopsFromHq.get(fl.at!) ?? 99) <= 2 && fl.ships.length > 0);
   const enemyStrengthAt = (pid: number) => fleetsAt(s, pid, enemy).reduce((sum, fl) => sum + fleetStrength(fl), 0);
   const platformStrength = classStrength(shipClass('platform'));
 
@@ -99,7 +99,7 @@ export function runAI(s: GameState, f: FactionId): void {
     const hops = hopDistances(s.lanes, fl.at!);
     let best: Planet | null = null, bestScore = 0;
     for (const p of s.planets) {
-      if (p.owner === f) continue;
+      if (p.owner === f || p.id === fl.at) continue;
       const h = hops.get(p.id) ?? 99;
       if (h > 7) continue;
       const risk = enemyStrengthAt(p.id) + p.defense * platformStrength + (p.owner === enemy ? 6 : 0);
@@ -110,6 +110,7 @@ export function runAI(s: GameState, f: FactionId): void {
       let value = p.production + p.shipyard * 6 + (p.owner === enemy ? 12 : f === 'empire' ? 8 : 4);
       if (p.owner === null && alignment(p, enemy) > 20) value += f === 'empire' ? 10 : 4; // secure it before it joins the other side
       if (p.owner === enemy && p.id === s.factions[enemy].hq && (f === 'rebellion' || fac.knowsEnemyHq)) value += 80;
+      if (canTake && p.owner === enemy && fleetsAt(s, p.id, f).length && !hasArmedEnemy(s, p.id, f)) value += 12; // our blockade is waiting for troops
       if (!canTake) value *= 0.45; // just a raid / blockade
       const score = value / (1 + h * 0.6) * rng.range(0.8, 1.2);
       if (score > bestScore) { bestScore = score; best = p; }
@@ -123,8 +124,8 @@ export function runAI(s: GameState, f: FactionId): void {
 
     // invade if we can
     if (here.owner !== f && canInvade(s, fl).ok && fl.troops > here.garrison * 1.3 + 0.5) { orderInvade(s, fl); continue; }
-    if (here.owner !== f && canInvade(s, fl).ok) {
-      // not enough troops: fetch some if we have room, otherwise keep the blockade
+    if (here.owner === enemy && !hasArmedEnemy(s, here.id, f) && here.defense === 0 && !here.invasion) {
+      // undefended enemy world but not enough troops: fetch some if we can carry them, otherwise hold the blockade
       if (fleetTroopCap(fl) > fl.troops) {
         const src = mine.filter(p => p.garrison > 2).sort((a, b) => b.garrison - a.garrison)[0];
         if (src && rng.chance(0.5)) { orderMove(s, fl, src.id); continue; }
@@ -133,14 +134,13 @@ export function runAI(s: GameState, f: FactionId): void {
     }
 
     // load troops when at home (leave a garrison of 2, or 4 at the capital)
-    const keep = here.id === fac.hq ? 4 : 2;
+    const keep = here.id === fac.hq ? 5 : 2;
     if (here.owner === f && here.garrison > keep && fl.troops < fleetTroopCap(fl)) transferTroops(s, fl, Math.min(here.garrison - keep, fleetTroopCap(fl) - fl.troops));
 
     const isHomeGuard = fl.at === hq.id;
     if (isHomeGuard) {
-      if (threatNearHome) continue;
-      // a bloated home fleet spins off a strike group
-      if (str > 110 && fl.ships.length >= 8) {
+      // the home guard never leaves the capital; when it grows large it spins off a strike group instead
+      if (!threatNearHome && str > 110 && fl.ships.length >= 8) {
         const ids = fl.ships.filter((_, i) => i % 2 === 0).map(sh => sh.id);
         const nf = orderSplit(s, fl, ids, Math.ceil(fl.troops / 2));
         if (nf) {
@@ -148,9 +148,8 @@ export function runAI(s: GameState, f: FactionId): void {
           const t = chooseTarget(nf, fleetStrength(nf));
           if (t) orderMove(s, nf, t.id); else orderMerge(s, fl, nf);
         }
-        continue;
       }
-      if (str < 70) continue;
+      continue;
     }
     if (str < 25 && fl.troops === 0) continue; // small groups may still go and land troops
 
@@ -182,7 +181,7 @@ export function runAI(s: GameState, f: FactionId): void {
     if (agents.length && rng.chance(f === 'empire' ? 0.5 : 0.25)) {
       const hops = hopDistances(s.lanes, agents[0].at);
       const prize = s.planets.filter(p => (hops.get(p.id) ?? 99) <= 5 && !missionProblem(s, agents[0], 'abduct', p.id))
-        .map(p => ({ p, score: (charactersAt(s, p.id, enemy).some(c => c.name === 'Mon Mothma') ? 5 : 1) * missionChance(s, agents.slice(0, 2), 'abduct', p.id) }))
+        .map(p => ({ p, score: (charactersAt(s, p.id, enemy).some(c => VICTORY_TARGETS[f].includes(c.name) || c.name === 'Mon Mothma') ? 5 : 1) * missionChance(s, agents.slice(0, 2), 'abduct', p.id) }))
         .sort((a, b) => b.score - a.score)[0];
       if (prize && prize.score >= 0.35) for (const a of agents.slice(0, 2)) { orderMission(s, a, 'abduct', prize.p.id); idle2.splice(idle2.indexOf(a), 1); }
     }

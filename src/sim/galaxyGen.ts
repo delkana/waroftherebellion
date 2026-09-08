@@ -78,7 +78,7 @@ export function generateGalaxy(opts: GenOptions): GameState {
   const cap = planets[empireHq];
   cap.loyalty = -90;
   const rebHq = planets[rebelHq];
-  rebHq.shipyard = Math.max(rebHq.shipyard, 2); rebHq.defense = Math.max(rebHq.defense, 1); rebHq.garrison = Math.max(rebHq.garrison, 4); rebHq.loyalty = 90;
+  rebHq.shipyard = Math.max(rebHq.shipyard, 2); rebHq.defense = Math.max(rebHq.defense, 2); rebHq.garrison = Math.max(rebHq.garrison, 6); rebHq.loyalty = 90;
 
   const state: GameState = {
     seed: opts.seed, hours: 0, speed: 0, player: opts.player,

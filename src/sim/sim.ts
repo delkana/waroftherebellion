@@ -344,6 +344,10 @@ function substep(s: GameState, dt: number): void {
     for (const f of FACTIONS) if (p.intel[f] > 0) p.intel[f] = Math.max(0, p.intel[f] - dt);
     if (p.owner) {
       const blockaded = isBlockaded(s, p);
+      if (blockaded !== !!p.blockaded) {
+        p.blockaded = blockaded;
+        log(s, blockaded ? `${p.name} is under blockade: production and construction halted` : `The blockade of ${p.name} is lifted`, p.owner === s.player ? (blockaded ? 'bad' : 'good') : 'info', 'all', p.id);
+      }
       if (!blockaded) {
         s.factions[p.owner].credits += planetIncomePerDay(s, p) * dt / HOURS_PER_DAY;
         const item = p.queue[0];
@@ -639,12 +643,43 @@ export function captureCharacter(s: GameState, c: Character, planetId: number): 
 
 export function factionName(f: FactionId): string { return f === 'empire' ? 'Empire' : 'Rebellion'; }
 
+/** The leaders each side must kill or capture, on top of taking the enemy capital. */
+export const VICTORY_TARGETS: Record<FactionId, string[]> = { empire: ['Luke Skywalker', 'Leia Organa'], rebellion: ['Palpatine', 'Darth Vader'] };
+/** Dead, or captured (anywhere). */
+export function leaderNeutralised(s: GameState, name: string): boolean {
+  const c = s.characters.find(x => x.name === name);
+  return !c || !!c.dead || c.captured;
+}
+export function capitalHeld(s: GameState, by: FactionId): boolean {
+  return s.planets[s.factions[enemyOf(by)].hq].owner === by;
+}
+
 export function checkVictory(s: GameState): void {
   if (s.winner) return;
+  // a side that loses its capital regroups on its strongest remaining world
+  for (const f of FACTIONS) {
+    const hq = s.planets[s.factions[f].hq];
+    if (hq.owner === f) { s.factions[f].relocated = false; continue; }
+    const remaining = ownedPlanets(s, f).sort((a, b) => (b.shipyard * 10 + b.production) - (a.shipyard * 10 + a.production));
+    if (remaining.length && remaining[0].id !== hq.id && !s.factions[f].relocated) {
+      s.factions[f].hq = remaining[0].id;
+      s.factions[f].relocated = true;
+      if (f === 'rebellion') s.factions.empire.knowsEnemyHq = false;
+      log(s, f === 'rebellion' ? `The Alliance has fled ${hq.name} and re-established its headquarters on ${remaining[0].name}` : `With ${hq.name} lost, the Imperial court regroups on ${remaining[0].name}`, 'battle', 'all', remaining[0].id);
+    }
+  }
   const empHq = s.planets[s.factions.empire.hq];
   const rebHq = s.planets[s.factions.rebellion.hq];
-  if (empHq.owner === 'rebellion') { s.winner = 'rebellion'; log(s, `${empHq.name} has fallen. The Rebellion is victorious!`, 'battle'); return; }
-  if (rebHq.owner === 'empire') { s.winner = 'empire'; log(s, `The Rebel headquarters on ${rebHq.name} has been captured. The Empire is victorious!`, 'battle'); return; }
+  for (const f of FACTIONS) {
+    const targets = VICTORY_TARGETS[f];
+    if (capitalHeld(s, f) && targets.every(n => leaderNeutralised(s, n))) {
+      s.winner = f;
+      log(s, f === 'rebellion'
+        ? `${empHq.name} is in Alliance hands and the Emperor and Vader are no more. The Rebellion is victorious!`
+        : `The Rebel base on ${rebHq.name} is taken and Skywalker and Organa are in Imperial hands. The Empire is victorious!`, 'battle');
+      return;
+    }
+  }
   for (const f of FACTIONS) {
     if (!s.planets.some(p => p.owner === f) && !s.fleets.some(fl => fl.faction === f)) { s.winner = enemyOf(f); log(s, `The ${factionName(f)} has been eliminated.`, 'battle'); }
   }

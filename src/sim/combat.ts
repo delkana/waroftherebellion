@@ -118,7 +118,7 @@ export function applyBattleResult(s: GameState, setup: BattleSetup, result: Batt
     c.assignment = null; c.at = setup.planet;
     const enemyHolds = s.fleets.some(x => x.faction !== c.faction && x.at === setup.planet && x.ships.length > 0) || (planet.owner && planet.owner !== c.faction);
     const mine = c.faction === s.player;
-    if (c.minor && rng.chance(0.5)) { c.dead = true; log(s, `${c.title} ${c.name} went down with the ${f.name}`, mine ? 'bad' : 'good', 'all', setup.planet); }
+    if (rng.chance(c.minor ? 0.5 : 0.25)) { c.dead = true; log(s, `${c.title} ${c.name} went down with the ${f.name}`, mine ? 'bad' : 'good', 'all', setup.planet); }
     else if (enemyHolds && rng.chance(0.5)) { captureCharacter(s, c, setup.planet); log(s, `${c.title} ${c.name} was captured in the wreckage of the ${f.name}`, mine ? 'bad' : 'good', 'all', setup.planet); }
     else { log(s, `${c.title} ${c.name} escaped the destruction of the ${f.name}`, mine ? 'info' : 'info', 'all', setup.planet); retreatCharacter(s, c); }
   }

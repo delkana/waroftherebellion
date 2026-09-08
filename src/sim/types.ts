@@ -40,6 +40,8 @@ export interface Planet {
   unrest: number;      // hours of accumulated unrest toward uprising
   /** Hours of intel remaining per faction (reveals details to that faction). */
   intel: Record<FactionId, number>;
+  /** Set while an enemy fleet sits in orbit (for blockade start/end messages). */
+  blockaded?: boolean;
 }
 
 export interface Lane { a: number; b: number; length: number }
@@ -100,6 +102,8 @@ export interface Faction {
   hq: number;            // capital (Empire) or hidden HQ (Rebellion)
   knowsEnemyHq: boolean;
   isAI: boolean;
+  /** Set after the capital fell and was moved; cleared once the new one is held. */
+  relocated?: boolean;
 }
 
 export interface LogEntry { time: number; text: string; faction: FactionId | 'all'; planet?: number; kind: 'info' | 'good' | 'bad' | 'battle' }

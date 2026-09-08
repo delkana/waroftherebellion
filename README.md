@@ -17,8 +17,11 @@ npm run build      # typecheck + production bundle in dist/
 ## The game
 
 - **Two factions.** The Galactic Empire holds the Core Worlds and Coruscant. The Rebel Alliance holds a handful of rim worlds and a **hidden headquarters**.
-  The Empire wins by capturing the HQ (it must first find it with espionage); the Rebellion wins
-  by taking Coruscant.
+  The Empire wins by capturing the hidden base (it must first find it) **and** killing or capturing
+  Luke Skywalker and Leia Organa; the Rebellion wins by taking Coruscant **and** killing or capturing
+  the Emperor and Darth Vader. A side that loses its capital regroups on its strongest remaining world,
+  so the war goes on until the leaders are dealt with. Headline leaders can die if their flagship is
+  destroyed, be captured on lost worlds or abducted by enemy agents.
 - **Real time with speed control.** 2 real seconds = 1 game hour at 1x. Pause, 1x/2x/4x/8x.
   The game pauses automatically when a battle starts.
 - **Canon galaxy.** 61 worlds placed on the real Star Wars galactic grid (positions from the
@@ -45,7 +48,7 @@ npm run build      # typecheck + production bundle in dist/
   escape or are freed when their world is liberated. Instead of missions, a leader can be assigned
   to **govern** a world (faster loyalty, harder for enemy agents) or **command** a fleet (leadership
   improves gunnery and retreats in battle). Recruited leaders can die when their flagship is lost;
-  the headline characters cannot. While Mon Mothma is alive and free, every world not under
+  the headline characters have a smaller chance of dying the same way. While Mon Mothma is alive and free, every world not under
   Imperial rule drifts one loyalty point a day toward the Alliance, which makes capturing her a
   strategic goal for the Empire.
 - **Invasion.** Clear the orbit, then land regiments from a fleet with transport capacity.
