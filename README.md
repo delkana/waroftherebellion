@@ -24,11 +24,11 @@ npm run build      # typecheck + production bundle in dist/
 - **Canon galaxy.** 61 worlds placed on the real Star Wars galactic grid (positions from the
   swgalaxymap.com / *Essential Atlas* coordinates via the community Space Engine sheet, see
   `src/sim/canonWorlds.ts`). The Empire starts with its twelve entrenched Core and industrial
-  strongholds (Coruscant, Kuat, Corellia, Fondor, Carida, Byss...), the Rebellion with its five
-  pre-Yavin strongholds (Yavin, Dantooine, Mon Calamari, Sullust, Toprawa); the other 44 worlds are
+  strongholds (Coruscant, Kuat, Corellia, Fondor, Carida, Byss...), the Rebellion with its six
+  pre-Yavin strongholds (Yavin, Dantooine, Mon Calamari, Sullust, Toprawa, Hoth); the other 43 worlds are
   neutral, leaning by canon sympathy (Alderaan, Chandrila, Kashyyyk, Ryloth toward the Rebellion;
   Kamino, Mustafar, Muunilinst, Scarif toward the Empire). Starting worlds are scattered, not
-  contiguous, and the hidden base is one of the five Rebel worlds, chosen at random.
+  contiguous, and the hidden base is one of the six Rebel worlds, chosen at random.
 - **Hyperlanes.** A sparse, non-crossing web of lanes; fleets travel only along them on shortest paths. Arriving at a system
   with enemy warships or enemy-owned defense platforms triggers a battle.
 - **Planets** have loyalty (-100 Empire ... +100 Rebellion) that drives income, uprisings, and
